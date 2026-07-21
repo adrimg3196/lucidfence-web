@@ -31,7 +31,7 @@ Crea un proyecto en la organización que vaya a ser propietaria de los datos. Co
 Instala una versión fijada de la CLI oficial como dependencia de desarrollo y ejecútala mediante `npx`:
 
 ```bash
-npm install --save-dev supabase@2.39.2
+npm install --save-dev supabase@2.109.1
 npx supabase login
 npx supabase link --project-ref TU_PROJECT_REF
 npx supabase db push
