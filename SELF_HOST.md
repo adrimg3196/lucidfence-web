@@ -1,6 +1,6 @@
 # Alojar LucidFence Web en infraestructura del usuario
 
-Este directorio es una aplicación estática autocontenida. No llama a servidores de LucidFence, no requiere backend y no contiene credenciales.
+El bundle `lucidfence-web-local` es una aplicación estática autocontenida. No llama a servidores de LucidFence, no requiere backend y no contiene credenciales. El bundle `lucidfence-web-cloud` añade el BFF Vercel y las migraciones Supabase descritas en `DEPLOY_CLOUD.md`.
 
 ## Opción 1 — servidor estático existente
 
@@ -46,7 +46,11 @@ O copia los archivos a cualquier Nginx/Caddy/S3 compatible con hosting estático
 
 ## UEM live
 
-Las API keys no deben entrar en este bundle. Para datos live, el cliente despliega `edge/uem-gateway` en su propia cuenta y configura `ALLOWED_ORIGIN`, `UPSTREAM_BASE_URL` y el secreto `UPSTREAM_TOKEN`. El gateway es read-only.
+Las API keys no deben entrar en este bundle. Para datos live, el cliente despliega `gateway/` en su propia cuenta y configura `ALLOWED_ORIGIN`, `UPSTREAM_BASE_URL` y el secreto `UPSTREAM_TOKEN`. El gateway es read-only.
+
+## Cloud propiedad del cliente
+
+Para Auth y sincronización multi-dispositivo bajo cuentas del cliente, utiliza el bundle cloud, crea sus proyectos Vercel/Supabase y sigue `DEPLOY_CLOUD.md`. El modo local continúa disponible aunque el backend cloud esté ausente.
 
 ## Actualizaciones y salida
 

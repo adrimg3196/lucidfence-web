@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm install --ignore-scripts
+      - run: npm test
+      - name: JavaScript syntax
+        run: |
+          node --check web-core.js
+          node --check web-store.js
+          node --check web-cloud.js
+          node --check web-app.js
+          node --check web-worker.js
+          node --check sw.js
+          for file in api/_lib/*.js api/auth/*.js api/workspaces/*.js api/*.js; do node --check "$file"; done

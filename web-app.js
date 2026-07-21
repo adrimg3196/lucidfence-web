@@ -1,6 +1,8 @@
 (function(){
   'use strict';
   let state=null;
+  const cloud=LucidFenceCloud.create();
+  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],activeWorkspaceId='';
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -12,6 +14,61 @@
     if(location.hash!=='#'+id) history.replaceState(null,'','#'+id);
   }
   function evidenceCoverage(){const tasks=state.tasks||[];return tasks.length?Math.round(100*tasks.filter(t=>Array.isArray(t.evidence)&&t.evidence.length).length/tasks.length):100;}
+  function renderCloud(){
+    $('#cloudUnavailable').classList.toggle('cloud-hidden',cloudAvailable);
+    $('#cloudAuth').classList.toggle('cloud-hidden',!cloudAvailable||Boolean(cloudUser));
+    $('#cloudWorkspace').classList.toggle('cloud-hidden',!cloudAvailable||!cloudUser);
+    $('#cloudModeTag').textContent=cloudAvailable?'CENTRAL SAAS':'LOCAL-FIRST';
+    $('#cloudBadge').textContent=!cloudAvailable?'Cloud no configurado':cloudUser?'Cloud conectado':'Cloud disponible';
+    $('#cloudUser').textContent=cloudUser?.email||'—';
+    const select=$('#cloudWorkspaceSelect'),previous=activeWorkspaceId;
+    select.innerHTML=cloudWorkspaces.length?cloudWorkspaces.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(item.role)}</option>`).join(''):'<option value="">Crea el primer workspace</option>';
+    if(cloudWorkspaces.some(item=>item.id===previous))select.value=previous;
+    else activeWorkspaceId=select.value||'';
+    $('#cloudPull').disabled=!activeWorkspaceId;
+    $('#cloudPush').disabled=!activeWorkspaceId;
+  }
+  async function refreshCloudSession(){
+    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];renderCloud();return;}
+    cloudUser=await cloud.me();
+    cloudWorkspaces=cloudUser?await cloud.listWorkspaces():[];
+    renderCloud();
+  }
+  async function loginCloud(event){
+    event.preventDefault();
+    try{await cloud.login($('#cloudLoginEmail').value,$('#cloudLoginPassword').value);event.target.reset();await refreshCloudSession();toast('Sesión cloud iniciada');}
+    catch(error){toast('Login cloud: '+error.message);}
+  }
+  async function signupCloud(event){
+    event.preventDefault();
+    try{const result=await cloud.signup($('#cloudSignupEmail').value,$('#cloudSignupPassword').value);event.target.reset();if(result.confirmationRequired){toast('Revisa tu email para confirmar la cuenta');return;}await refreshCloudSession();toast('Cuenta cloud creada');}
+    catch(error){toast('Alta cloud: '+error.message);}
+  }
+  async function createCloudWorkspace(){
+    try{const workspace=await cloud.createWorkspace($('#cloudWorkspaceName').value);$('#cloudWorkspaceName').value='';cloudWorkspaces=await cloud.listWorkspaces();activeWorkspaceId=workspace.id;await cloud.pull(activeWorkspaceId);renderCloud();toast('Workspace cloud creado');}
+    catch(error){toast('Workspace cloud: '+error.message);}
+  }
+  async function pullCloud(){
+    try{if(!activeWorkspaceId)throw new Error('Selecciona un workspace');const remote=await cloud.pull(activeWorkspaceId);if(remote.payload&&Object.keys(remote.payload).length){const clean=LucidFenceWeb.sanitizeImport(remote.payload);state={...LucidFenceWeb.initialState(),...clean,agents:LucidFenceWeb.AGENTS};await persist();toast('Workspace descargado desde cloud');}else toast('El workspace cloud está vacío; puedes subir este navegador');}
+    catch(error){toast('Descarga cloud: '+error.message);}
+  }
+  async function pushCloud(){
+    try{
+      if(!activeWorkspaceId)throw new Error('Selecciona un workspace');
+      let saved;
+      try{saved=await cloud.push(activeWorkspaceId,state);}catch(error){
+        if(error.code!=='revision_required')throw error;
+        const remote=await cloud.pull(activeWorkspaceId);
+        if(remote.payload&&Object.keys(remote.payload).length)throw new Error('Cloud ya contiene datos; descárgalos antes de sobrescribir');
+        saved=await cloud.push(activeWorkspaceId,state);
+      }
+      toast('Workspace sincronizado · revisión '+saved.revision);
+    }catch(error){toast(error.code==='revision_conflict'?'Conflicto cloud: descarga la última revisión':'Subida cloud: '+error.message);}
+  }
+  async function logoutCloud(){
+    try{await cloud.logout();cloudUser=null;cloudWorkspaces=[];activeWorkspaceId='';renderCloud();toast('Sesión cloud cerrada; el modo local sigue activo');}
+    catch(error){toast('Logout cloud: '+error.message);}
+  }
   function render(){
     const snap=LucidFenceWeb.snapshot(state);
     $('#cycleValue').textContent=state.cycle||0;
@@ -28,6 +85,7 @@
     $('#fleetRows').innerHTML=(state.devices||[]).map(d=>`<tr><td><strong>${esc(d.name)}</strong><br><span style="color:var(--muted)">${esc(d.id)}</span></td><td>${esc(d.platform)}</td><td class="state ${esc(d.fenceState)}">${esc(d.fenceState)}</td><td>${esc(d.risk)}</td><td>${d.compliant?'Cumple':'No cumple'}</td></tr>`).join('');
     const map=$('#map');map.querySelectorAll('.point').forEach(node=>node.remove());
     (state.devices||[]).filter(d=>d.lat!==null&&d.lng!==null).forEach((d,index)=>{const point=document.createElement('button');point.className='point '+(d.fenceState==='outside'?'out':'');point.style.left=(23+(index*13)%62)+'%';point.style.top=(22+(index*17)%59)+'%';point.title=d.name+' · '+d.fenceState;point.setAttribute('aria-label',point.title);map.appendChild(point);});
+    renderCloud();
   }
   async function persist(){state.updatedAt=new Date().toISOString();await WebStore.save(state);render();}
   function cycleWithWorker(){return new Promise((resolve,reject)=>{
@@ -54,6 +112,13 @@
     $('#pauseBtn').addEventListener('click',async()=>{state.paused=!state.paused;await persist();toast(state.paused?'Compañía pausada':'Compañía reanudada');});
     $('#exportBtn').addEventListener('click',exportWorkspace);$('#resetBtn').addEventListener('click',async()=>{if(confirm('¿Eliminar el workspace guardado en este navegador?')){state=await WebStore.reset();render();toast('Workspace restablecido');}});
     $('#importFile').addEventListener('change',event=>{if(event.target.files[0])importWorkspace(event.target.files[0]);event.target.value='';});
+    $('#cloudLoginForm').addEventListener('submit',loginCloud);
+    $('#cloudSignupForm').addEventListener('submit',signupCloud);
+    $('#cloudCreateWorkspace').addEventListener('click',createCloudWorkspace);
+    $('#cloudPull').addEventListener('click',pullCloud);
+    $('#cloudPush').addEventListener('click',pushCloud);
+    $('#cloudLogout').addEventListener('click',logoutCloud);
+    $('#cloudWorkspaceSelect').addEventListener('change',event=>{activeWorkspaceId=event.target.value;renderCloud();});
     $('#saveGateway').addEventListener('click',async()=>{
       try{
         const value=$('#gatewayUrl').value.trim(),url=new URL(value);
@@ -76,6 +141,7 @@
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
+    cloud.detect().then(async available=>{cloudAvailable=available;await refreshCloudSession();}).catch(()=>{cloudAvailable=false;renderCloud();});
     window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }

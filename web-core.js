@@ -16,7 +16,9 @@
     ['qa-sre','QA y SRE','Valida evidencia y rollback']
   ].map(([id,name,mission])=>({id,name,mission}));
   const FORBIDDEN=/^(wipe|factory_reset|delete_device|delete_tenant|disable_audit)$/;
-  const SECRET_KEY=/(api[_-]?key|token|secret|password|credential|authorization)/i;
+  const SECRET_SEGMENTS=new Set(['token','secret','password','credential','credentials','authorization']);
+  function canonicalFieldName(key){return String(key).replace(/([a-z0-9])([A-Z])/g,'$1_$2').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').toLowerCase();}
+  function isSecretField(key){const canonical=canonicalFieldName(key),segments=canonical.split('_').filter(Boolean);return segments.some(segment=>SECRET_SEGMENTS.has(segment))||canonical==='apikey'||canonical.includes('api_key')||canonical.includes('private_key')||canonical.includes('service_role');}
   const now=()=>new Date().toISOString();
   function id(prefix){
     const bytes=new Uint8Array(6);
@@ -44,7 +46,7 @@
       if(item&&typeof item==='object'){
         const clean={};
         for(const [key,val] of Object.entries(item)){
-          if(SECRET_KEY.test(key)) throw new Error('Secret fields are forbidden in browser imports: '+path+key);
+          if(isSecretField(key)) throw new Error('Secret fields are forbidden in browser imports: '+path+key);
           clean[key]=walk(val,path+key+'.');
         }
         return clean;
