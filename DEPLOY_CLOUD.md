@@ -28,16 +28,16 @@ Cada cliente puede hacer fork, crear sus propios proyectos Vercel/Supabase y apl
 
 Crea un proyecto en la organización que vaya a ser propietaria de los datos. Conserva fuera del repositorio cualquier contraseña o secreto.
 
-Instala la CLI oficial y autentícate en tu propio terminal:
+Instala una versión fijada de la CLI oficial como dependencia de desarrollo y ejecútala mediante `npx`:
 
 ```bash
-npm install --global supabase
-supabase login
-supabase link --project-ref TU_PROJECT_REF
-supabase db push
+npm install --save-dev supabase@2.39.2
+npx supabase login
+npx supabase link --project-ref TU_PROJECT_REF
+npx supabase db push
 ```
 
-`supabase db push` aplica:
+`npx supabase db push` aplica:
 
 ```text
 supabase/migrations/202607210001_initial.sql

@@ -86,6 +86,20 @@ test('Supabase server failures are generic and do not expose database details', 
   );
 });
 
+test('Supabase 4xx failures do not expose auth or database internals', async () => {
+  const { createSupabaseClient } = await import(supabaseUrl);
+  const client = createSupabaseClient(
+    { url: 'https://project.supabase.co', key: 'sb_publishable_example' },
+    async () => new Response(JSON.stringify({ message: 'User already registered: auth.users constraint users_email_key' }), {
+      status: 400, headers: { 'content-type': 'application/json' }
+    })
+  );
+  await assert.rejects(
+    client.json('/auth/v1/signup', { method: 'POST', body: {} }),
+    error => error.status === 400 && error.code === 'cloud_request_rejected' && !/already registered|auth\.users|users_email_key/i.test(error.message)
+  );
+});
+
 test('Supabase requests always use the configured public key and optional user JWT', async () => {
   const { createSupabaseClient } = await import(supabaseUrl);
   let captured;

@@ -53,8 +53,7 @@ export function createSupabaseClient(config = readConfig(), fetchImpl = fetch) {
       if (response.status >= 500) {
         throw new HttpError(502, 'cloud_unavailable', 'Cloud provider is temporarily unavailable');
       }
-      const safeMessage = payload?.msg || payload?.message || payload?.error_description || 'Cloud request failed';
-      throw new HttpError(response.status, 'supabase_error', safeMessage);
+      throw new HttpError(response.status, 'cloud_request_rejected', 'Cloud provider rejected the request');
     }
     return { payload, response };
   }

@@ -26,7 +26,7 @@ export function workspaceId(value) {
   return id;
 }
 
-const SECRET_SEGMENTS = new Set(['token', 'secret', 'password', 'credential', 'credentials', 'authorization']);
+const SECRET_SEGMENTS = new Set(['token', 'secret', 'password', 'credential', 'credentials', 'authorization', 'jwt', 'bearer', 'cookie']);
 
 function canonicalFieldName(key) {
   return String(key)
@@ -41,12 +41,23 @@ function isSecretField(key) {
   const segments = canonical.split('_').filter(Boolean);
   return segments.some(segment => SECRET_SEGMENTS.has(segment)) ||
     canonical === 'apikey' || canonical.includes('api_key') ||
-    canonical.includes('private_key') || canonical.includes('service_role');
+    canonical.includes('private_key') || canonical.includes('service_role') ||
+    canonical.includes('session_key');
+}
+
+function isSecretValue(value) {
+  return /^bearer\s+\S+$/i.test(value) ||
+    /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value) ||
+    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(value);
 }
 
 export function safeWorkspaceState(value, depth = 0) {
   if (depth > 12) throw new HttpError(400, 'invalid_workspace_state', 'Workspace state is too deeply nested');
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value;
+  if (value === null || ['number', 'boolean'].includes(typeof value)) return value;
+  if (typeof value === 'string') {
+    if (isSecretValue(value)) throw new HttpError(400, 'secret_value_rejected', 'Secret-like value rejected');
+    return value;
+  }
   if (Array.isArray(value)) {
     if (value.length > 10000) throw new HttpError(400, 'invalid_workspace_state', 'Workspace state contains an oversized list');
     return value.map(item => safeWorkspaceState(item, depth + 1));

@@ -13,6 +13,8 @@ test('release builder produces separate local and cloud bundles', async () => {
   assert.match(script, /api/);
   assert.match(script, /supabase/);
   assert.match(script, /zip/);
+  assert.match(script, /SOURCE_DATE_EPOCH/);
+  assert.match(script, /sorted\(item for item in source\.rglob/);
   assert.match(script, /\[\[ -f "\$file" \]\] \|\| continue/);
 });
 

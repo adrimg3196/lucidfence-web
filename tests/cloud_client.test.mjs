@@ -67,3 +67,22 @@ test('cloud errors expose safe codes for UI decisions', async () => {
   await cloud.pull('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
   await assert.rejects(cloud.push('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', {}), error => error.code === 'revision_conflict' && error.status === 409);
 });
+
+test('switching back to a workspace requires a fresh pull before push', async () => {
+  const calls = [];
+  const cloud = Cloud.create(async (url, options) => {
+    calls.push({ url, options });
+    if ((options.method || 'GET') === 'GET') {
+      const id = new URL(url, 'https://app.example').searchParams.get('workspaceId');
+      return new Response(JSON.stringify({ state: { workspace_id: id, payload: { id }, revision: 3 } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ state: { revision: 4 } }), { status: 200 });
+  });
+  await cloud.pull('workspace-a');
+  await cloud.pull('workspace-b');
+  cloud.invalidate('workspace-a');
+  await assert.rejects(cloud.push('workspace-a', { from: 'workspace-b' }), error => error.code === 'revision_required');
+  assert.equal(calls.filter(call => call.options.method === 'PUT').length, 0);
+  assert.equal(cloud.canPush('workspace-a'), false);
+  assert.equal(cloud.canPush('workspace-b'), true);
+});

@@ -26,7 +26,7 @@
     if(cloudWorkspaces.some(item=>item.id===previous))select.value=previous;
     else activeWorkspaceId=select.value||'';
     $('#cloudPull').disabled=!activeWorkspaceId;
-    $('#cloudPush').disabled=!activeWorkspaceId;
+    $('#cloudPush').disabled=!activeWorkspaceId||!cloud.canPush(activeWorkspaceId);
   }
   async function refreshCloudSession(){
     if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];renderCloud();return;}
@@ -49,19 +49,21 @@
     catch(error){toast('Workspace cloud: '+error.message);}
   }
   async function pullCloud(){
-    try{if(!activeWorkspaceId)throw new Error('Selecciona un workspace');const remote=await cloud.pull(activeWorkspaceId);if(remote.payload&&Object.keys(remote.payload).length){const clean=LucidFenceWeb.sanitizeImport(remote.payload);state={...LucidFenceWeb.initialState(),...clean,agents:LucidFenceWeb.AGENTS};await persist();toast('Workspace descargado desde cloud');}else toast('El workspace cloud está vacío; puedes subir este navegador');}
+    try{
+      if(!activeWorkspaceId)throw new Error('Selecciona un workspace');
+      const workspaceId=activeWorkspaceId,remote=await cloud.pull(workspaceId);
+      if(activeWorkspaceId!==workspaceId){cloud.invalidate(workspaceId);throw new Error('El workspace seleccionado cambió durante la descarga');}
+      if(remote.payload&&Object.keys(remote.payload).length){
+        if(!confirm('Descargar cloud sustituirá el workspace local de este navegador. Exporta antes si necesitas una copia. ¿Continuar?')){cloud.invalidate(workspaceId);renderCloud();toast('Descarga cancelada; el estado local no cambió');return;}
+        const clean=LucidFenceWeb.sanitizeImport(remote.payload);state={...LucidFenceWeb.initialState(),...clean,agents:LucidFenceWeb.AGENTS};await persist();toast('Workspace descargado desde cloud');
+      }else{renderCloud();toast('El workspace cloud está vacío; puedes subir este navegador');}
+    }
     catch(error){toast('Descarga cloud: '+error.message);}
   }
   async function pushCloud(){
     try{
       if(!activeWorkspaceId)throw new Error('Selecciona un workspace');
-      let saved;
-      try{saved=await cloud.push(activeWorkspaceId,state);}catch(error){
-        if(error.code!=='revision_required')throw error;
-        const remote=await cloud.pull(activeWorkspaceId);
-        if(remote.payload&&Object.keys(remote.payload).length)throw new Error('Cloud ya contiene datos; descárgalos antes de sobrescribir');
-        saved=await cloud.push(activeWorkspaceId,state);
-      }
+      const saved=await cloud.push(activeWorkspaceId,state);
       toast('Workspace sincronizado · revisión '+saved.revision);
     }catch(error){toast(error.code==='revision_conflict'?'Conflicto cloud: descarga la última revisión':'Subida cloud: '+error.message);}
   }
@@ -118,7 +120,7 @@
     $('#cloudPull').addEventListener('click',pullCloud);
     $('#cloudPush').addEventListener('click',pushCloud);
     $('#cloudLogout').addEventListener('click',logoutCloud);
-    $('#cloudWorkspaceSelect').addEventListener('change',event=>{activeWorkspaceId=event.target.value;renderCloud();});
+    $('#cloudWorkspaceSelect').addEventListener('change',event=>{activeWorkspaceId=event.target.value;if(activeWorkspaceId)cloud.invalidate(activeWorkspaceId);renderCloud();toast('Descarga este workspace antes de subir cambios');});
     $('#saveGateway').addEventListener('click',async()=>{
       try{
         const value=$('#gatewayUrl').value.trim(),url=new URL(value);

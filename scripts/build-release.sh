@@ -40,8 +40,34 @@ done < <(git ls-files -co --exclude-standard -z)
   find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS
 )
 
-(cd "$TMP/local" && zip -q -X -r "$DIST/lucidfence-web-local-${VERSION}.zip" .)
-(cd "$TMP/cloud" && zip -q -X -r "$DIST/lucidfence-web-cloud-${VERSION}.zip" .)
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
+reproducible_zip() {
+  local source_dir="$1" output_file="$2"
+  python3 - "$source_dir" "$output_file" "$SOURCE_DATE_EPOCH" <<'PY'
+import datetime
+import pathlib
+import stat
+import sys
+import zipfile
+
+source = pathlib.Path(sys.argv[1])
+output = pathlib.Path(sys.argv[2])
+epoch = max(int(sys.argv[3]), 315532800)
+stamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
+date_time = (stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second - stamp.second % 2)
+with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    for path in sorted(item for item in source.rglob('*') if item.is_file()):
+        info = zipfile.ZipInfo(path.relative_to(source).as_posix(), date_time)
+        info.create_system = 3
+        mode = 0o755 if path.stat().st_mode & stat.S_IXUSR else 0o644
+        info.external_attr = (stat.S_IFREG | mode) << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+PY
+}
+
+reproducible_zip "$TMP/local" "$DIST/lucidfence-web-local-${VERSION}.zip"
+reproducible_zip "$TMP/cloud" "$DIST/lucidfence-web-cloud-${VERSION}.zip"
 (
   cd "$DIST"
   shasum -a 256 "lucidfence-web-local-${VERSION}.zip" "lucidfence-web-cloud-${VERSION}.zip" > SHA256SUMS

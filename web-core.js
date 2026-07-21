@@ -16,9 +16,10 @@
     ['qa-sre','QA y SRE','Valida evidencia y rollback']
   ].map(([id,name,mission])=>({id,name,mission}));
   const FORBIDDEN=/^(wipe|factory_reset|delete_device|delete_tenant|disable_audit)$/;
-  const SECRET_SEGMENTS=new Set(['token','secret','password','credential','credentials','authorization']);
+  const SECRET_SEGMENTS=new Set(['token','secret','password','credential','credentials','authorization','jwt','bearer','cookie']);
   function canonicalFieldName(key){return String(key).replace(/([a-z0-9])([A-Z])/g,'$1_$2').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').toLowerCase();}
-  function isSecretField(key){const canonical=canonicalFieldName(key),segments=canonical.split('_').filter(Boolean);return segments.some(segment=>SECRET_SEGMENTS.has(segment))||canonical==='apikey'||canonical.includes('api_key')||canonical.includes('private_key')||canonical.includes('service_role');}
+  function isSecretField(key){const canonical=canonicalFieldName(key),segments=canonical.split('_').filter(Boolean);return segments.some(segment=>SECRET_SEGMENTS.has(segment))||canonical==='apikey'||canonical.includes('api_key')||canonical.includes('private_key')||canonical.includes('service_role')||canonical.includes('session_key');}
+  function isSecretValue(value){return /^bearer\s+\S+$/i.test(value)||/^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value)||/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(value);}
   const now=()=>new Date().toISOString();
   function id(prefix){
     const bytes=new Uint8Array(6);
@@ -51,7 +52,7 @@
         }
         return clean;
       }
-      if(typeof item==='string'&&/(bearer\s+[a-z0-9._-]{12,}|lf_[a-z0-9_-]{20,})/i.test(item)) throw new Error('Secret-like values are forbidden in browser imports');
+      if(typeof item==='string'&&isSecretValue(item)) throw new Error('Secret values are forbidden in browser imports');
       return item;
     }
     const clean=walk(value,'');

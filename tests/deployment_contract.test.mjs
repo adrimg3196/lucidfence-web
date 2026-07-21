@@ -10,9 +10,7 @@ test('Vercel config serves the PWA and applies security headers', async () => {
   assert.ok(config.rewrites.some(rule => rule.source === '/' && rule.destination === '/index.html'));
   assert.ok(config.rewrites.some(rule => rule.source === '/runtime.json' && rule.destination === '/api/runtime'));
   const serialized = JSON.stringify(config);
-  for (const header of ['Content-Security-Policy', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy', 'Permissions-Policy']) {
-    assert.ok(serialized.includes(header), `missing ${header}`);
-  }
+  for (const header of ['Content-Security-Policy', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy', 'Permissions-Policy']) assert.ok(serialized.includes(header));
   assert.match(serialized, /connect-src 'self' https:/);
   assert.match(serialized, /Cache-Control/);
 });
@@ -27,13 +25,33 @@ test('environment template contains placeholders only and never requests service
 
 test('cloud deployment guide keeps central and customer-owned infrastructure separate', async () => {
   const guide = await read('DEPLOY_CLOUD.md');
-  for (const text of ['Infraestructura central', 'Infraestructura del cliente', 'supabase db push', 'Vercel Hobby', 'uso no comercial', 'RLS', 'HttpOnly']) {
-    assert.ok(guide.includes(text), `guide missing ${text}`);
-  }
+  for (const text of ['Infraestructura central', 'Infraestructura del cliente', 'supabase db push', 'Vercel Hobby', 'uso no comercial', 'RLS', 'HttpOnly']) assert.ok(guide.includes(text));
 });
 
 test('CI runs cloud contracts without requiring credentials', async () => {
   const workflow = await read('.github/workflows/ci.yml');
   assert.match(workflow, /npm test/);
   assert.doesNotMatch(workflow, /SUPABASE_PUBLISHABLE_KEY:\s*[^\n]*sb_/);
+});
+
+test('Docker BYOI serves an explicit static allowlist only', async () => {
+  const dockerfile = await read('deploy/Dockerfile');
+  const ignore = await read('.dockerignore');
+  assert.doesNotMatch(dockerfile, /COPY[^\n]*\s\.\s+\/usr\/share\/nginx\/html/);
+  for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
+  for (const privatePath of ['.git', '.env', 'api', 'tests', '.github']) assert.ok(ignore.includes(privatePath));
+});
+
+test('Pages executes the full gate before uploading production', async () => {
+  const workflow = await read('.github/workflows/pages.yml');
+  assert.match(workflow, /npm ci --ignore-scripts/);
+  assert.match(workflow, /npm run check/);
+  assert.ok(workflow.indexOf('npm run check') < workflow.indexOf('actions/upload-pages-artifact'));
+});
+
+test('Supabase guide uses a pinned local CLI through npx', async () => {
+  const guide = await read('DEPLOY_CLOUD.md');
+  assert.match(guide, /npm install --save-dev supabase@/);
+  assert.match(guide, /npx supabase db push/);
+  assert.doesNotMatch(guide, /npm install --global supabase/);
 });

@@ -5,17 +5,12 @@ import { safeWorkspaceState } from '../api/_lib/validation.js';
 await import('../web-core.js');
 
 const SECRET_VARIANTS = [
-  'accessToken',
-  'clientSecret',
-  'serviceRoleKey',
-  'privateKey',
-  'github_token',
-  'API Key',
-  'authorizationHeader',
-  'device-password'
+  'accessToken', 'clientSecret', 'serviceRoleKey', 'privateKey', 'github_token',
+  'API Key', 'authorizationHeader', 'device-password', 'jwt', 'accessJwt',
+  'bearer', 'cookie', 'sessionKey'
 ];
 
-test('server rejects common camelCase, snake_case, spaced and dashed secret fields', () => {
+test('server rejects common secret field variants', () => {
   for (const key of SECRET_VARIANTS) {
     assert.throws(
       () => safeWorkspaceState({ settings: { [key]: 'sensitive-value' } }),
@@ -39,4 +34,16 @@ test('normal operational fields remain accepted', () => {
   const state = { settings: { gatewayUrl: 'https://gateway.example', mode: 'demo' }, tokenizedLabel: 'public taxonomy' };
   assert.deepEqual(safeWorkspaceState(state), state);
   assert.deepEqual(globalThis.LucidFenceWeb.sanitizeImport(state), state);
+});
+
+test('obvious secret values are rejected even under innocent field names', () => {
+  const values = [
+    'Bearer abc.def.ghi',
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signaturevalue',
+    '-----BEGIN PRIVATE KEY-----\n[REDACTED]\n-----END PRIVATE KEY-----'
+  ];
+  for (const value of values) {
+    assert.throws(() => safeWorkspaceState({ note: value }), error => error?.code === 'secret_value_rejected');
+    assert.throws(() => globalThis.LucidFenceWeb.sanitizeImport({ note: value }), /secret values are forbidden/i);
+  }
 });
