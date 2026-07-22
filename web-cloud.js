@@ -97,7 +97,7 @@
     function canPush(workspaceId) { return Number.isSafeInteger(revisions.get(workspaceId)); }
     function status() { return { available: session.available, user: session.user, revisions: Object.fromEntries(revisions) }; }
 
-    return { detect, login, signup, me, logout, listWorkspaces, createWorkspace, pull, push, invalidate, canPush, status };
+    return { detect, login, signup, me, logout, listWorkspaces, createWorkspace, pull, push, invalidate, canPush, status, request };
   }
 
   root.LucidFenceCloud = Object.freeze({ create, CloudError });

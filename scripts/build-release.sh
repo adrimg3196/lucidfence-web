@@ -17,7 +17,7 @@ rm -rf "$DIST"
 mkdir -p "$DIST" "$TMP/local" "$TMP/cloud"
 
 LOCAL_FILES=(
-  index.html web.html web-core.js web-store.js web-cloud.js web-app.js web-worker.js
+  index.html web.html web-core.js web-store.js web-cloud.js web-fleet.js web-app.js web-worker.js
   sw.js runtime.json manifest.webmanifest lucidfence-icon.svg .nojekyll
   README.md SELF_HOST.md LICENSE
 )

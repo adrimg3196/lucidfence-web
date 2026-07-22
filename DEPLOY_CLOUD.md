@@ -62,6 +62,16 @@ SUPABASE_URL=https://TU_PROYECTO.supabase.co
 SUPABASE_PUBLISHABLE_KEY=[REDACTED]
 ```
 
+Para el conector FleetDM (opcional, solo lectura), añade también:
+
+```text
+FLEET_URL=https://fleet.tuempresa.com
+FLEET_API_TOKEN=[REDACTED]
+FLEET_FLEET_ID=
+```
+
+El token de Fleet vive solo en el servidor. La PWA nunca lo recibe; el BFF `/api/fleet/hosts` devuelve dispositivos normalizados y no permite escrituras. GeoIP de Fleet es aproximado y jamás dispara acciones MDM.
+
 La publishable key está diseñada para cliente público, pero aquí se usa server-side para que la PWA no dependa directamente de Supabase. Nunca configures `service_role`, `sb_secret_*`, la contraseña de Postgres ni un JWT secret.
 
 Despliega y verifica:

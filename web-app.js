@@ -140,6 +140,16 @@
         await persist();toast(payload.devices.length+' dispositivos sincronizados desde tu gateway');showView('fleet');
       }catch(error){toast('Sincronización fallida: '+error.message);}
     });
+    $('#syncFleet').addEventListener('click',async()=>{
+      try{
+        if(!cloudAvailable)throw new Error('El conector Fleet requiere el workspace cloud (Vercel + Supabase)');
+        const fleet=LucidFenceFleet.create(cloud,LucidFenceWeb.sanitizeImport);
+        const {devices,locationWarning}=await fleet.load();
+        if(!devices.length)throw new Error('Fleet no devolvió dispositivos');
+        state.devices=devices;state.settings={...state.settings,mode:'live_fleet',fleetReadOnly:true,lastSync:new Date().toISOString()};
+        await persist();toast(devices.length+' dispositivos Fleet sincronizados (solo lectura)');if(locationWarning)console.info('Fleet:',locationWarning);showView('fleet');
+      }catch(error){toast('Fleet: '+error.message);}
+    });
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
