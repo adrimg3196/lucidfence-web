@@ -7,7 +7,7 @@ const read = name => readFile(new URL(name, root), 'utf8');
 
 test('PWA exposes a dedicated SaaS auth shell without making cloud mandatory', async () => {
   const html = await read('web.html');
-  for (const id of ['cloudBadge','cloudUnavailable','cloudAuth','cloudAuthDialog','cloudAuthError','cloudAuthLoginTab','cloudAuthSignupTab','cloudWorkspace','cloudLoginForm','cloudSignupForm','cloudCreateWorkspace','cloudPull','cloudPush']) {
+  for (const id of ['cloudBadge','cloudBoot','cloudUnavailable','cloudAuth','cloudAuthDialog','cloudAuthError','cloudAuthLoginTab','cloudAuthSignupTab','cloudWorkspace','cloudLoginForm','cloudSignupForm','cloudCreateWorkspace','cloudPull','cloudPush']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.ok(html.indexOf('web-cloud.js') < html.indexOf('web-app.js'));
@@ -27,12 +27,12 @@ test('frontend binds auth and prevents cross-workspace push without pull', async
   for (const fragment of [
     'LucidFenceCloud.create()', '.detect()', '.login(', '.signup(', '.logout()',
     '.listWorkspaces()', '.createWorkspace(', '.pull(', '.push(', '.oauthProviders()', 'consumeAuthError(',
-    'setAuthMode(', 'setAuthBusy(', 'showAuthError('
+    'setAuthMode(', 'setAuthBusy(', 'showAuthError(', 'cloudResolved=true'
   ]) assert.ok(source.includes(fragment), `missing ${fragment}`);
   assert.match(source, /cloud\.invalidate\(activeWorkspaceId\)/);
   assert.match(source, /cloud\.canPush\(activeWorkspaceId\)/);
-  assert.match(source, /shell\.inert=needsAuth/);
-  assert.match(source, /shell\.setAttribute\('aria-hidden',String\(needsAuth\)\)/);
+  assert.match(source, /shell\.inert=!cloudResolved\|\|needsAuth/);
+  assert.match(source, /shell\.setAttribute\('aria-hidden',String\(!cloudResolved\|\|needsAuth\)\)/);
   assert.match(source, /confirm\(/);
 });
 
