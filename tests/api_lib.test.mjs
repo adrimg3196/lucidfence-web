@@ -58,12 +58,13 @@ test('runtime config refuses service-role or secret keys', async () => {
   assert.equal(config.key, 'sb_publishable_example');
 });
 
-test('Supabase serialization conflicts become HTTP 409 without leaking SQL details', async () => {
+test('Supabase PT409 conflicts become safe revision conflicts', async () => {
   const { createSupabaseClient } = await import(supabaseUrl);
   const client = createSupabaseClient(
     { url: 'https://project.supabase.co', key: 'sb_publishable_example' },
-    async () => new Response(JSON.stringify({ code: '40001', message: 'workspace revision conflict', details: 'internal SQL details' }), {
-      status: 500, headers: { 'content-type': 'application/json' }
+    async () => new Response(JSON.stringify({ code: 'PT409', message: 'workspace revision conflict', details: 'internal SQL details' }), {
+      status: 409,
+      headers: { 'content-type': 'application/json' }
     })
   );
   await assert.rejects(

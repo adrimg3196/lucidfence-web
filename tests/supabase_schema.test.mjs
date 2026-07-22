@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const migrationUrl = new URL('../supabase/migrations/202607210001_initial.sql', import.meta.url);
+const conflictMigrationUrl = new URL('../supabase/migrations/202607220001_revision_conflict_status.sql', import.meta.url);
 
 async function migration() {
   return readFile(migrationUrl, 'utf8');
@@ -60,6 +61,13 @@ test('state writes use an optimistic-lock RPC with a payload cap', async () => {
   assert.ok(sql.includes('grant execute on function public.save_workspace_state(uuid, bigint, jsonb) to authenticated'));
   assert.ok(sql.includes('grant select on public.workspace_state to authenticated'));
   assert.doesNotMatch(sql, /grant select, insert, update on public\.workspace_state/);
+});
+
+test('revision conflicts use an immediate PostgREST PT409 status', async () => {
+  const sql = (await readFile(conflictMigrationUrl, 'utf8')).toLowerCase();
+  assert.ok(sql.includes('create or replace function public.save_workspace_state'));
+  assert.ok(sql.includes("raise sqlstate 'pt409'"));
+  assert.doesNotMatch(sql, /40001/);
 });
 
 test('anonymous role has no direct tenant table privileges', async () => {

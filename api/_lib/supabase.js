@@ -47,7 +47,7 @@ export function createSupabaseClient(config = readConfig(), fetchImpl = fetch) {
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
     if (!response.ok) {
-      if (payload?.code === '40001') {
+      if (payload?.code === '40001' || payload?.code === 'PT409' || response.status === 409) {
         throw new HttpError(409, 'revision_conflict', 'Cloud state changed; reload before overwriting');
       }
       if (response.status >= 500) {
