@@ -5,24 +5,34 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = name => readFile(new URL(name, root), 'utf8');
 
-test('PWA exposes local and central-cloud modes without making cloud mandatory', async () => {
+test('PWA exposes a dedicated SaaS auth shell without making cloud mandatory', async () => {
   const html = await read('web.html');
-  for (const id of ['cloudBadge','cloudUnavailable','cloudAuth','cloudWorkspace','cloudLoginForm','cloudSignupForm','cloudCreateWorkspace','cloudPull','cloudPush']) {
+  for (const id of ['cloudBadge','cloudUnavailable','cloudAuth','cloudAuthDialog','cloudAuthError','cloudAuthLoginTab','cloudAuthSignupTab','cloudWorkspace','cloudLoginForm','cloudSignupForm','cloudCreateWorkspace','cloudPull','cloudPush']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.ok(html.indexOf('web-cloud.js') < html.indexOf('web-app.js'));
+  assert.match(html, /id="cloudAuth"[^>]*cloud-auth-gate[^>]*cloud-hidden/);
+  assert.match(html, /id="cloudAuthDialog"[^>]*role="dialog"[^>]*aria-modal="true"/);
   assert.match(html, /id="cloudGoogleSso"[^>]*href="\/api\/auth\/oauth\/start\?provider=google"/);
   assert.match(html, /id="cloudGoogleSso"[^>]*cloud-hidden/);
+  assert.match(html, /autocomplete="current-password"/);
+  assert.match(html, /autocomplete="new-password"/);
+  assert.match(html, /Contraseña segura · mínimo 8 caracteres/);
+  assert.match(html, /\.auth-access\{min-width:0/);
+  assert.match(html, /\.auth-dialog\{width:100%;max-width:430px;min-width:0/);
 });
 
 test('frontend binds auth and prevents cross-workspace push without pull', async () => {
   const source = await read('web-app.js');
   for (const fragment of [
     'LucidFenceCloud.create()', '.detect()', '.login(', '.signup(', '.logout()',
-    '.listWorkspaces()', '.createWorkspace(', '.pull(', '.push(', '.oauthProviders()', 'consumeAuthError('
+    '.listWorkspaces()', '.createWorkspace(', '.pull(', '.push(', '.oauthProviders()', 'consumeAuthError(',
+    'setAuthMode(', 'setAuthBusy(', 'showAuthError('
   ]) assert.ok(source.includes(fragment), `missing ${fragment}`);
   assert.match(source, /cloud\.invalidate\(activeWorkspaceId\)/);
   assert.match(source, /cloud\.canPush\(activeWorkspaceId\)/);
+  assert.match(source, /shell\.inert=needsAuth/);
+  assert.match(source, /shell\.setAttribute\('aria-hidden',String\(needsAuth\)\)/);
   assert.match(source, /confirm\(/);
 });
 
