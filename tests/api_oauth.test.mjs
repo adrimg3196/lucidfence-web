@@ -37,11 +37,27 @@ function cookiePair(setCookie, name = 'lf_oauth_flow') {
 
 function flowFromStart(res) {
   const location = new URL(res.headers.get('location'));
+  const redirectTo = new URL(location.searchParams.get('redirect_to'));
   return {
-    state: location.searchParams.get('state'),
+    flowId: redirectTo.searchParams.get('flow'),
     flowCookie: cookiePair(res.headers.get('set-cookie')),
-    location
+    location,
+    redirectTo
   };
+}
+
+function simulateGoTruePkceRedirect(authorizeUrl, authCode = 'provider-code') {
+  // Contract checked against supabase/auth 76e2aace4899f71bfc6038c8a00c913936a4561e:
+  // external.go creates/consumes its UUID state; verify.go prepPKCERedirectURL preserves
+  // redirect_to's query and adds only the auth code.
+  const authorize = new URL(authorizeUrl);
+  assert.equal(authorize.searchParams.has('state'), false, 'LucidFence must not override GoTrue provider state');
+  const upstreamProviderState = '11111111-1111-4111-8111-111111111111';
+  assert.match(upstreamProviderState, /^[0-9a-f-]{36}$/);
+  const finalCallback = new URL(authorize.searchParams.get('redirect_to'));
+  finalCallback.searchParams.set('code', authCode);
+  assert.equal(finalCallback.searchParams.has('state'), false, 'GoTrue internal state never reaches the app callback');
+  return finalCallback;
 }
 
 async function startFlow(overrides = {}) {
@@ -83,15 +99,18 @@ test('providers exposes only Google when explicitly enabled and nothing when dis
 });
 
 test('start creates bounded encrypted flow cookie and exact trusted-origin PKCE redirect', async () => {
-  const { res, state, flowCookie, location } = await startFlow();
+  const { res, flowId, flowCookie, location, redirectTo } = await startFlow();
   assert.equal(res.statusCode, 303);
   assert.equal(location.origin + location.pathname, 'https://project.supabase.co/auth/v1/authorize');
   assert.equal(location.searchParams.get('provider'), 'google');
-  assert.equal(location.searchParams.get('redirect_to'), 'https://app.example/api/auth/oauth/callback');
+  assert.equal(redirectTo.origin + redirectTo.pathname, 'https://app.example/api/auth/oauth/callback');
+  assert.deepEqual([...redirectTo.searchParams.keys()], ['flow']);
   assert.equal(location.searchParams.get('code_challenge_method'), 'S256');
   assert.match(location.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/);
-  assert.match(state, /^[A-Za-z0-9_-]{43}$/);
+  assert.match(flowId, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(location.searchParams.has('state'), false);
   assert.ok(flowCookie.length > 80);
+  assert.ok(flowCookie.length <= 4096);
   const setCookie = res.headers.get('set-cookie');
   for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/api/auth/oauth']) assert.match(setCookie, new RegExp(flag));
   const maxAge = Number(setCookie.match(/Max-Age=(\d+)/)?.[1]);
@@ -106,8 +125,25 @@ test('start never derives callback origin from Host or forwarded headers', async
   const res = response();
   await start(request('/api/auth/oauth/start?provider=google', { host: 'poison.example' }), res);
   const location = new URL(res.headers.get('location'));
-  assert.equal(location.searchParams.get('redirect_to'), 'https://trusted-deploy.vercel.app/api/auth/oauth/callback');
+  const redirectTo = new URL(location.searchParams.get('redirect_to'));
+  assert.equal(redirectTo.origin + redirectTo.pathname, 'https://trusted-deploy.vercel.app/api/auth/oauth/callback');
   assert.doesNotMatch(location.href, /poison|attacker/);
+});
+
+test('start rejects every non-canonical deployment origin', async () => {
+  const { default: start } = await import('../api/auth/oauth/start.js');
+  for (const origin of [
+    'http://app.example', 'https://app.example:443', 'https://app.example:8443',
+    'https://app.example.', 'https://user@app.example', 'https://app.example/',
+    'https://app.example/path', 'https://app.example/%2e', 'https://app.example?x=1',
+    'https://app.example#fragment'
+  ]) {
+    setEnv({ APP_ORIGIN: origin });
+    const res = response();
+    await start(request('/api/auth/oauth/start?provider=google'), res);
+    assert.equal(res.statusCode, 500, `${origin} returned ${res.statusCode}`);
+    assert.equal(res.headers.has('location'), false);
+  }
 });
 
 test('start rejects disabled, unknown, duplicated provider and unapproved return destinations', async () => {
@@ -126,8 +162,9 @@ test('start rejects disabled, unknown, duplicated provider and unapproved return
   }
 });
 
-test('callback exchanges code once server-side, sets session cookies and redirects cleanly', async () => {
-  const { state, flowCookie } = await startFlow();
+test('GoTrue keeps its UUID state upstream and redirects only LucidFence flow plus code', async () => {
+  const { res: startResponse, flowId, flowCookie } = await startFlow();
+  const callbackUrl = simulateGoTruePkceRedirect(startResponse.headers.get('location'));
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options) => {
@@ -140,7 +177,7 @@ test('callback exchanges code once server-side, sets session cookies and redirec
   try {
     const { default: callback } = await import('../api/auth/oauth/callback.js');
     const res = response();
-    await callback(request(`/api/auth/oauth/callback?code=provider-code&state=${state}`, { cookie: flowCookie }), res);
+    await callback(request(`${callbackUrl.pathname}${callbackUrl.search}`, { cookie: flowCookie }), res);
     assert.equal(res.statusCode, 303);
     assert.equal(res.headers.get('location'), '/');
     assert.equal(res.headers.get('cache-control'), 'no-store');
@@ -157,21 +194,25 @@ test('callback exchanges code once server-side, sets session cookies and redirec
     assert.ok(cookies.some(value => value.startsWith('lf_access=') && value.includes('HttpOnly')));
     assert.ok(cookies.some(value => value.startsWith('lf_refresh=') && value.includes('HttpOnly')));
     assert.doesNotMatch(`${res.body}${res.headers.get('location')}`, /provider-code|oauth-access-secret|oauth-refresh-secret|code_verifier/);
+    assert.equal(callbackUrl.searchParams.get('flow'), flowId);
+    assert.deepEqual([...callbackUrl.searchParams.keys()].sort(), ['code', 'flow']);
   } finally { globalThis.fetch = originalFetch; }
 });
 
 test('callback rejects duplicate params and code plus error without exchange, always clearing flow', async () => {
-  const { state, flowCookie } = await startFlow();
+  const { flowId, flowCookie } = await startFlow();
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; throw new Error('must not exchange'); };
   try {
     const { default: callback } = await import('../api/auth/oauth/callback.js');
     const queries = [
-      `code=a&code=b&state=${state}`,
-      `code=a&state=${state}&state=${state}`,
-      `error=denied&error=again&state=${state}`,
-      `code=a&error=denied&state=${state}`
+      `code=a&code=b&flow=${flowId}`,
+      `code=a&flow=${flowId}&flow=${flowId}`,
+      `error=denied&error=again&flow=${flowId}`,
+      `code=a&error=denied&flow=${flowId}`,
+      `code=a&flow=${flowId}&state=provider-state`,
+      `code=a&flow=${flowId}&unexpected=value`
     ];
     for (const query of queries) {
       const res = response();
@@ -182,7 +223,40 @@ test('callback rejects duplicate params and code plus error without exchange, al
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('callback rejects state mismatch, tamper, expiry, provider error and replay with generic redirects', async () => {
+test('callback returns a real 405 and clears the flow cookie for non-GET methods', async () => {
+  setEnv();
+  const { default: callback } = await import('../api/auth/oauth/callback.js');
+  const res = response();
+  await callback(request('/api/auth/oauth/callback?flow=x&code=y', { method: 'POST', cookie: 'lf_oauth_flow=secret' }), res);
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.headers.has('location'), false);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assertClearsFlow(res);
+  assert.doesNotMatch(res.body, /secret|flow=x|code=y/);
+});
+
+test('encrypted OAuth envelope is canonical, bounded and has an exact validated shape', async () => {
+  setEnv();
+  const { createOAuthFlow, openOAuthFlow, sealOAuthFlow } = await import('../api/_lib/oauth.js');
+  const generated = createOAuthFlow(1234);
+  const valid = { flowId: generated.flowId, codeVerifier: generated.codeVerifier, issuedAt: 1234, returnTo: 'home' };
+  assert.deepEqual(openOAuthFlow(sealOAuthFlow(valid)), valid);
+  const invalidFlows = [
+    { ...valid, extra: true },
+    { ...valid, flowId: 'x'.repeat(42) },
+    { ...valid, flowId: `${'x'.repeat(42)}=` },
+    { ...valid, codeVerifier: 'x'.repeat(42) },
+    { ...valid, codeVerifier: 'x'.repeat(129) },
+    { ...valid, codeVerifier: `${'x'.repeat(42)}!` },
+    { ...valid, issuedAt: 1234.5 },
+    { ...valid, returnTo: 'https://evil.example' }
+  ];
+  for (const flow of invalidFlows) assert.throws(() => openOAuthFlow(sealOAuthFlow(flow)), /invalid/i);
+  assert.throws(() => openOAuthFlow('a'.repeat(4097)), /invalid/i);
+  assert.throws(() => openOAuthFlow('AAAAAAAAAAAAAAAA.!!!!.AAAAAAAAAAAAAAAAAAAAAA'), /invalid/i);
+});
+
+test('callback rejects flow mismatch, tamper, expiry, provider error and replay with generic redirects', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return new Response('{}', { status: 500 }); };
@@ -194,13 +268,13 @@ test('callback rejects state mismatch, tamper, expiry, provider error and replay
     const envelopeParts = decodeURIComponent(encodedEnvelope).split('.');
     envelopeParts[1] = `${envelopeParts[1][0] === 'a' ? 'b' : 'a'}${envelopeParts[1].slice(1)}`;
     const tampered = `${cookieName}=${encodeURIComponent(envelopeParts.join('.'))}`;
-    const expiredValue = sealOAuthFlow({ state: fresh.state, codeVerifier: 'v'.repeat(64), issuedAt: Date.now() - 301000, returnTo: 'home' }, process.env);
+    const expiredValue = sealOAuthFlow({ flowId: fresh.flowId, codeVerifier: 'v'.repeat(64), issuedAt: Date.now() - 301000, returnTo: 'home' }, process.env);
     const cases = [
-      [`code=a&state=${'x'.repeat(43)}`, fresh.flowCookie],
-      [`code=a&state=${fresh.state}`, tampered],
-      [`code=a&state=${fresh.state}`, `lf_oauth_flow=${encodeURIComponent(expiredValue)}`],
-      [`error=access_denied&error_description=provider+internals&state=${fresh.state}`, fresh.flowCookie],
-      [`code=a&state=${fresh.state}`, 'lf_oauth_flow=']
+      [`code=a&flow=${'x'.repeat(43)}`, fresh.flowCookie],
+      [`code=a&flow=${fresh.flowId}`, tampered],
+      [`code=a&flow=${fresh.flowId}`, `lf_oauth_flow=${encodeURIComponent(expiredValue)}`],
+      [`error=access_denied&error_description=provider+internals&flow=${fresh.flowId}`, fresh.flowCookie],
+      [`code=a&flow=${fresh.flowId}`, 'lf_oauth_flow=']
     ];
     for (const [query, cookie] of cases) {
       const res = response();
@@ -212,7 +286,7 @@ test('callback rejects state mismatch, tamper, expiry, provider error and replay
 });
 
 test('callback clears the one-time browser flow after a failed Supabase exchange and does not retry', async () => {
-  const { state, flowCookie } = await startFlow();
+  const { flowId, flowCookie } = await startFlow();
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
@@ -222,7 +296,7 @@ test('callback clears the one-time browser flow after a failed Supabase exchange
   try {
     const { default: callback } = await import('../api/auth/oauth/callback.js');
     const res = response();
-    await callback(request(`/api/auth/oauth/callback?code=bad&state=${state}`, { cookie: flowCookie }), res);
+    await callback(request(`/api/auth/oauth/callback?code=bad&flow=${flowId}`, { cookie: flowCookie }), res);
     assertGenericFailure(res);
     assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; }

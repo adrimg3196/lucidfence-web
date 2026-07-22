@@ -67,11 +67,11 @@ test('OAuth providers are discovered through the same-origin BFF', async () => {
 
 test('OAuth callback error is generic and removed from browser history', () => {
   let replacement = '';
-  const location = { href: 'https://app.example/?auth_error=sso_failed#connect' };
+  const location = { href: 'https://app.example/?keep=yes&auth_error=sso_failed&code=secret&state=secret&flow=secret&error=denied&error_description=private#connect' };
   const history = { replaceState(_state, _title, value) { replacement = value; } };
   assert.equal(Cloud.consumeAuthError(location, history), true);
-  assert.equal(replacement, '/#connect');
-  assert.doesNotMatch(replacement, /auth_error|code|state|message/);
+  assert.equal(replacement, '/?keep=yes#connect');
+  assert.doesNotMatch(replacement, /auth_error|code|state|flow|error|error_description|secret|private/);
   assert.equal(Cloud.consumeAuthError({ href: 'https://app.example/?auth_error=unexpected' }, history), false);
 });
 

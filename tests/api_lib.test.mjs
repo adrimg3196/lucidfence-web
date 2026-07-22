@@ -34,6 +34,19 @@ test('session cookies are HttpOnly, strict, bounded and secure in production', a
   assert.ok(cookies.some(cookie => cookie.startsWith('lf_refresh=')));
 });
 
+test('session cookies reject non-string, oversized and control-bearing tokens', async () => {
+  const { sessionCookies } = await import(httpUrl);
+  const invalid = [
+    { access_token: 123, refresh_token: 'refresh' },
+    { access_token: 'access', refresh_token: {} },
+    { access_token: '', refresh_token: 'refresh' },
+    { access_token: 'a'.repeat(16385), refresh_token: 'refresh' },
+    { access_token: 'access\nheader', refresh_token: 'refresh' },
+    { access_token: 'access', refresh_token: 'refresh\u007fvalue' }
+  ];
+  for (const session of invalid) assert.throws(() => sessionCookies(session, true), /invalid session/i);
+});
+
 test('mutations reject missing or cross-origin requests', async () => {
   const { assertSameOrigin } = await import(httpUrl);
   assert.doesNotThrow(() => assertSameOrigin(request({ method: 'POST' })));

@@ -9,6 +9,8 @@ export class HttpError extends Error {
 
 const COOKIE_NAMES = Object.freeze({ access: 'lf_access', refresh: 'lf_refresh' });
 const MAX_BODY = 1024 * 1024;
+const MAX_SESSION_TOKEN_LENGTH = 16 * 1024;
+const TOKEN_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/;
 
 function cookie(name, value, maxAge, secure) {
   const parts = [
@@ -23,7 +25,11 @@ function cookie(name, value, maxAge, secure) {
 }
 
 export function sessionCookies(session, secure = true) {
-  if (!session?.access_token || !session?.refresh_token) throw new HttpError(502, 'invalid_session', 'Identity provider returned an invalid session');
+  const tokens = [session?.access_token, session?.refresh_token];
+  if (tokens.some(token => typeof token !== 'string' || token.length === 0
+      || token.length > MAX_SESSION_TOKEN_LENGTH || TOKEN_CONTROLS.test(token))) {
+    throw new HttpError(502, 'invalid_session', 'Identity provider returned an invalid session');
+  }
   const accessAge = Math.min(Math.max(Number(session.expires_in) || 3600, 60), 24 * 60 * 60);
   return [
     cookie(COOKIE_NAMES.access, session.access_token, accessAge, secure),

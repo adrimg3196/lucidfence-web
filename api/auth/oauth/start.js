@@ -19,17 +19,18 @@ export default async function handler(req, res) {
     if (!googleSsoEnabled()) throw new HttpError(404, 'oauth_provider_unavailable', 'OAuth provider is unavailable');
     if (query(req) !== 'google') throw new HttpError(400, 'invalid_provider', 'OAuth provider is invalid');
     const config = readConfig();
-    const redirectTo = callbackUrl();
     const flow = createOAuthFlow();
+    const redirectTo = callbackUrl(flow.flowId);
     const authorize = new URL('/auth/v1/authorize', config.url);
     authorize.searchParams.set('provider', 'google');
     authorize.searchParams.set('redirect_to', redirectTo);
     authorize.searchParams.set('code_challenge', flow.codeChallenge);
     authorize.searchParams.set('code_challenge_method', 'S256');
-    authorize.searchParams.set('state', flow.state);
+
     res.statusCode = 303;
     res.setHeader('Location', authorize.href);
-    res.setHeader('Set-Cookie', oauthFlowCookie(sealOAuthFlow(flow)));
+    const flowEnvelope = { flowId: flow.flowId, codeVerifier: flow.codeVerifier, issuedAt: flow.issuedAt, returnTo: flow.returnTo };
+    res.setHeader('Set-Cookie', oauthFlowCookie(sealOAuthFlow(flowEnvelope)));
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.end();

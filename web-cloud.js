@@ -113,7 +113,7 @@
     try { url = new URL(locationLike.href); } catch { return false; }
     const failed = url.searchParams.get('auth_error') === 'sso_failed';
     if (!url.searchParams.has('auth_error')) return false;
-    url.searchParams.delete('auth_error');
+    for (const name of ['auth_error', 'code', 'state', 'flow', 'error', 'error_description']) url.searchParams.delete(name);
     const clean = `${url.pathname}${url.search}${url.hash}`;
     historyLike.replaceState(null, '', clean);
     return failed;

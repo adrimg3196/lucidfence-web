@@ -62,10 +62,17 @@ ${SUPABASE_URL}/auth/v1/callback
 En Supabase, activa Google en **Authentication > Providers** con las credenciales de Google. En **Authentication > URL Configuration**, añade a la allowlist de redirect URLs cada callback de LucidFence que vayas a servir, por ejemplo:
 
 ```text
-https://TU_DOMINIO/api/auth/oauth/callback
+https://TU_DOMINIO/api/auth/oauth/callback?flow=*
 ```
 
-Para previews, añade cada dominio de preview autorizado de forma explícita. El callback debe coincidir con `APP_ORIGIN`; no uses comodines amplios en producción.
+El `flow` es un correlador base64url aleatorio de 256 bits y cambia en cada login. Por eso la entrada autorizada incluye `?flow=*`; el comodín queda limitado a ese único valor y no debe ampliarse al host ni al path. Si `APP_ORIGIN` coincide con la **Site URL**, GoTrue también acepta el callback por compartir exactamente esquema, host y puerto, preservando su query. Para previews, añade cada dominio de preview autorizado de forma explícita con el mismo path y patrón de query. El callback debe coincidir con `APP_ORIGIN`; no uses comodines de dominio o path en producción.
+
+Supabase GoTrue posee el parámetro OAuth superior `state`: crea un UUID interno, lo envía a Google y lo consume en `${SUPABASE_URL}/auth/v1/callback`. LucidFence **no** envía ni espera un `state` propio en `/auth/v1/authorize`. El binding de navegador/login-CSRF usa dos piezas independientes:
+
+1. una cookie AEAD `HttpOnly` de un solo uso que contiene `flowId`, PKCE verifier, fecha y destino;
+2. el mismo `flowId` únicamente dentro del `redirect_to` como `?flow=<id>`.
+
+Al completar Google, GoTrue conserva esa query y añade `code`; el callback final de LucidFence recibe únicamente `flow` + `code` (o `flow` + `error`), compara `flow` en tiempo constante con la cookie y canjea una sola vez en `POST /auth/v1/token?grant_type=pkce` con JSON `{ "auth_code": "...", "code_verifier": "..." }`. El UUID `state` interno de GoTrue nunca llega a LucidFence.
 
 ## 2. Crear Vercel
 
@@ -81,7 +88,7 @@ APP_ORIGIN=https://TU_DOMINIO
 OAUTH_COOKIE_SECRET=[REDACTED]
 ```
 
-`OAUTH_COOKIE_SECRET` debe contener al menos 32 bytes aleatorios y guardarse únicamente como secreto de Vercel (genera uno distinto por entorno). `APP_ORIGIN` debe ser el origen HTTPS exacto, sin ruta ni query. Si se omite, el backend usa únicamente la variable de sistema `VERCEL_URL` del deployment; nunca deriva callbacks de `Host` ni `X-Forwarded-Host`. Mantén `GOOGLE_SSO_ENABLED=false` en bundles locales/estáticos.
+`OAUTH_COOKIE_SECRET` debe contener al menos 32 bytes aleatorios y guardarse únicamente como secreto de Vercel (genera uno distinto por entorno). `APP_ORIGIN` debe ser el origen HTTPS canónico exacto (`https://host`): sin slash final, puerto explícito, punto final en el hostname, userinfo, ruta, query ni fragment. Si se omite, el backend usa únicamente la variable de sistema `VERCEL_URL` del deployment; nunca deriva callbacks de `Host` ni `X-Forwarded-Host`. Mantén `GOOGLE_SSO_ENABLED=false` en bundles locales/estáticos.
 
 Para Multi-UEM (opcional y siempre server-side), configura uno o varios proveedores con los nombres documentados en `.env.example`: FleetDM, Applivery, Intune, Jamf o un gateway compatible para Hexnode, Workspace ONE y ChromeOS.
 
