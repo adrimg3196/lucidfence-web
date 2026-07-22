@@ -27,6 +27,7 @@ test('frontend binds auth and prevents cross-workspace push without pull', async
 test('service worker caches cloud client, bypasses API and deletes only LucidFence caches', async () => {
   const source = await read('sw.js');
   assert.ok(source.includes("'./web-cloud.js'"));
+  assert.ok(source.includes("'./web-uem.js'"));
   assert.match(source, /url\.pathname\.startsWith\('\/api\/'\)/);
   assert.match(source, /url\.pathname===\'\/runtime\.json\'/);
   assert.match(source, /respondWith\(fetch\(event\.request\)\)/);

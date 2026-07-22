@@ -60,6 +60,7 @@ test('fetchFleetHosts paginates and normalizes without secrets', async () => {
   let calls = 0;
   const fakeFetch = async (url, options) => {
     assert.equal(options.method, 'GET');
+    assert.equal(options.redirect, 'error');
     assert.match(options.headers.Authorization, /^Bearer /);
     const body = pages[calls];
     calls += 1;

@@ -73,7 +73,7 @@ export function normalizeHost(host) {
   };
 }
 
-export async function fetchFleetHosts(base, token, fleetId, signal, fetchImpl = fetch, maxPages = 100) {
+export async function fetchFleetHosts(base, token, fleetId, signal, fetchImpl = fetch, maxPages = 100, dispatcher = null) {
   const hosts = [];
   for (let page = 0; page < maxPages; page += 1) {
     const params = new URLSearchParams({
@@ -89,7 +89,9 @@ export async function fetchFleetHosts(base, token, fleetId, signal, fetchImpl = 
     const response = await fetchImpl(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      signal
+      signal,
+      redirect: 'error',
+      ...(dispatcher ? { dispatcher } : {})
     });
     if (!response.ok) {
       const retry = response.headers?.get?.('retry-after');

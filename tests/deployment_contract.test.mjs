@@ -38,7 +38,7 @@ test('Docker BYOI serves an explicit static allowlist only', async () => {
   const dockerfile = await read('deploy/Dockerfile');
   const ignore = await read('.dockerignore');
   assert.doesNotMatch(dockerfile, /COPY[^\n]*\s\.\s+\/usr\/share\/nginx\/html/);
-  for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
+  for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'web-uem.js', 'web-fleet.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
   for (const privatePath of ['.git', '.env', 'api', 'tests', '.github']) assert.ok(ignore.includes(privatePath));
 });
 

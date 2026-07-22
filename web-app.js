@@ -2,7 +2,8 @@
   'use strict';
   let state=null;
   const cloud=LucidFenceCloud.create();
-  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],activeWorkspaceId='';
+  const uem=LucidFenceUem.create(cloud,LucidFenceWeb.sanitizeImport);
+  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='';
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -29,9 +30,11 @@
     $('#cloudPush').disabled=!activeWorkspaceId||!cloud.canPush(activeWorkspaceId);
   }
   async function refreshCloudSession(){
-    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];renderCloud();return;}
+    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];uemProviders=[];uemStatusMessage='';renderCloud();return;}
     cloudUser=await cloud.me();
     cloudWorkspaces=cloudUser?await cloud.listWorkspaces():[];
+    if(!cloudWorkspaces.some(item=>item.id===activeWorkspaceId))activeWorkspaceId=cloudWorkspaces[0]?.id||'';
+    if(cloudUser&&activeWorkspaceId){try{uemProviders=await uem.status(activeWorkspaceId);uemStatusMessage='';}catch(error){uemProviders=[];uemStatusMessage=error.code==='uem_workspace_not_bound'||error.code==='workspace_connector_denied'?'Este workspace aún no tiene credenciales UEM vinculadas.':'No se pudo consultar el catálogo UEM.';}}
     renderCloud();
   }
   async function loginCloud(event){
@@ -45,7 +48,7 @@
     catch(error){toast('Alta cloud: '+error.message);}
   }
   async function createCloudWorkspace(){
-    try{const workspace=await cloud.createWorkspace($('#cloudWorkspaceName').value);$('#cloudWorkspaceName').value='';cloudWorkspaces=await cloud.listWorkspaces();activeWorkspaceId=workspace.id;await cloud.pull(activeWorkspaceId);renderCloud();toast('Workspace cloud creado');}
+    try{const workspace=await cloud.createWorkspace($('#cloudWorkspaceName').value);$('#cloudWorkspaceName').value='';cloudWorkspaces=await cloud.listWorkspaces();activeWorkspaceId=workspace.id;await cloud.pull(activeWorkspaceId);try{uemProviders=await uem.status(activeWorkspaceId);uemStatusMessage='';}catch{uemProviders=[];uemStatusMessage='Este workspace aún no tiene credenciales UEM vinculadas.';}renderCloud();toast('Workspace cloud creado');}
     catch(error){toast('Workspace cloud: '+error.message);}
   }
   async function pullCloud(){
@@ -68,7 +71,7 @@
     }catch(error){toast(error.code==='revision_conflict'?'Conflicto cloud: descarga la última revisión':'Subida cloud: '+error.message);}
   }
   async function logoutCloud(){
-    try{await cloud.logout();cloudUser=null;cloudWorkspaces=[];activeWorkspaceId='';renderCloud();toast('Sesión cloud cerrada; el modo local sigue activo');}
+    try{await cloud.logout();cloudUser=null;cloudWorkspaces=[];activeWorkspaceId='';uemProviders=[];uemStatusMessage='';renderCloud();toast('Sesión cloud cerrada; el modo local sigue activo');}
     catch(error){toast('Logout cloud: '+error.message);}
   }
   function render(){
@@ -78,13 +81,17 @@
     $('#outsideValue').textContent=snap.outside;
     $('#complianceValue').textContent=snap.compliance+'%';
     $('#evidenceValue').textContent=evidenceCoverage()+'%';
+    if($('#providersValue'))$('#providersValue').textContent=snap.providers?String(snap.providers):'DEMO';
     $('#pauseBtn').textContent=state.paused?'Reanudar compañía':'Pausar compañía';
     $('#gatewayUrl').value=state.settings?.gatewayUrl||'';
     $('#runCycle').disabled=state.paused||!(state.goals||[]).some(g=>g.status==='active');
     $('#agents').innerHTML=(state.agents||LucidFenceWeb.AGENTS).map(a=>`<article class="agent"><strong>${esc(a.name)}</strong><p>${esc(a.mission)}</p></article>`).join('');
     $('#goals').innerHTML=(state.goals||[]).length?(state.goals||[]).slice().reverse().map(g=>`<article class="row"><div><strong>${esc(g.title)}</strong><p>${esc(g.outcome)}<br>${esc(g.metric.name)}: ${g.metric.current===null?'—':esc(g.metric.current)} → ${esc(g.metric.target)}</p></div><span class="tag">${esc(g.status.toUpperCase())}</span></article>`).join(''):'<div class="empty">Crea el primer objetivo medible. Ningún ciclo comienza sin una meta.</div>';
     $('#tasks').innerHTML=(state.tasks||[]).length?(state.tasks||[]).slice(-10).reverse().map(t=>`<article class="row"><div><strong>${esc(t.action)}</strong><p>${esc(t.title)} · ${esc(t.agent)}<br>${esc(t.evidence?.[0]?.source||'evidence')} = ${esc(t.evidence?.[0]?.value??'—')}</p></div><span class="tag ${t.risk==='medium'?'medium':''}">${esc(t.risk.toUpperCase())} · ${esc(t.status.toUpperCase())}</span></article>`).join(''):'<div class="empty">La cola está vacía. Ejecuta un ciclo seguro para producir evidencia.</div>';
-    $('#fleetRows').innerHTML=(state.devices||[]).map(d=>`<tr><td><strong>${esc(d.name)}</strong><br><span style="color:var(--muted)">${esc(d.id)}</span></td><td>${esc(d.platform)}</td><td class="state ${esc(d.fenceState)}">${esc(d.fenceState)}</td><td>${esc(d.risk)}</td><td>${d.compliant?'Cumple':'No cumple'}</td></tr>`).join('');
+    $('#fleetRows').innerHTML=(state.devices||[]).map(d=>`<tr><td><strong>${esc(d.name)}</strong><br><span style="color:var(--muted)">${esc(d.id)}</span></td><td>${esc((d.providerSources||[d.provider||'local']).join(' + '))}</td><td>${esc(d.platform)}</td><td class="state ${esc(d.fenceState)}">${esc(d.fenceState)}</td><td>${esc(d.risk)}</td><td>${d.compliant===null||d.compliant===undefined?'Desconocido':d.compliant?'Cumple':'No cumple'}</td></tr>`).join('');
+    if($('#uemProviders'))$('#uemProviders').innerHTML=uemProviders.map(p=>`<span class="tag ${p.configured?'':'medium'}">${esc(p.name)} · ${p.configured?'LISTO':p.mode==='gateway'?'GATEWAY':'NO CONFIG.'}</span>`).join('')||`<span class="cloud-meta">${esc(cloudUser?(uemStatusMessage||'Este workspace no tiene conectores configurados.'):'Inicia sesión cloud para consultar conectores.')}</span>`;
+    if($('#uemBindingHint'))$('#uemBindingHint').textContent=activeWorkspaceId?`Workspace activo: ${activeWorkspaceId} · Vincúlalo mediante UEM_ALLOWED_WORKSPACE_IDS.`:'Selecciona o crea un workspace cloud.';
+    if($('#uemSummary'))$('#uemSummary').textContent=snap.providers?`${snap.providers} proveedores · ${snap.devices} dispositivos unificados`:`Modo demo · ${snap.devices} dispositivos`;
     const map=$('#map');map.querySelectorAll('.point').forEach(node=>node.remove());
     (state.devices||[]).filter(d=>d.lat!==null&&d.lng!==null).forEach((d,index)=>{const point=document.createElement('button');point.className='point '+(d.fenceState==='outside'?'out':'');point.style.left=(23+(index*13)%62)+'%';point.style.top=(22+(index*17)%59)+'%';point.title=d.name+' · '+d.fenceState;point.setAttribute('aria-label',point.title);map.appendChild(point);});
     renderCloud();
@@ -102,15 +109,28 @@
   }
   async function createGoal(event){
     event.preventDefault();
-    try{LucidFenceWeb.createGoal(state,{title:$('#goalTitle').value,outcome:$('#goalOutcome').value,target:$('#goalTarget').value,autonomy:$('#goalAutonomy').value});await persist();event.target.reset();$('#goalTarget').value='0';$('#goalAutonomy').value='simulate';toast('Objetivo creado en este navegador');}catch(error){toast(error.message);}
+    try{const template=LucidFenceWeb.GOAL_TEMPLATES.find(item=>item.id===$('#goalTemplate').value);LucidFenceWeb.createGoal(state,{title:$('#goalTitle').value,outcome:$('#goalOutcome').value,target:$('#goalTarget').value,autonomy:$('#goalAutonomy').value,metricName:template?.metricName,direction:template?.direction,templateId:template?.id});await persist();toast('Objetivo creado');}catch(error){toast(error.message);}
+  }
+  async function quickGoal(){
+    try{
+      let goal=(state.goals||[]).find(item=>item.status==='active');
+      if(!goal)goal=LucidFenceWeb.createRecommendedGoal(state,'recommend');
+      await persist();
+      const output=await cycleWithWorker();state=output.state;await persist();
+      toast(`/goal listo · ${goal.title} · ${output.result.tasks.length} recomendaciones`);
+    }catch(error){toast('/goal: '+error.message);}
+  }
+  function applyGoalTemplate(){
+    const template=LucidFenceWeb.GOAL_TEMPLATES.find(item=>item.id===$('#goalTemplate').value)||LucidFenceWeb.recommendedTemplate(state);
+    $('#goalTitle').value=template.title;$('#goalOutcome').value=template.outcome;$('#goalTarget').value=String(template.target);
   }
   async function importWorkspace(file){
-    try{const raw=JSON.parse(await file.text());const clean=LucidFenceWeb.sanitizeImport(raw);if(!Array.isArray(clean.devices))throw new Error('El workspace necesita una lista devices');state={...LucidFenceWeb.initialState(),...clean,agents:LucidFenceWeb.AGENTS};await persist();toast('Workspace importado sin secretos');}catch(error){toast('Importación bloqueada: '+error.message);}
+    try{const raw=JSON.parse(await file.text());const clean=LucidFenceWeb.sanitizeImport(raw);if(!Array.isArray(clean.devices))throw new Error('El workspace necesita una lista devices');state={...LucidFenceWeb.initialState(),...clean,agents:LucidFenceWeb.AGENTS};state.devices=LucidFenceWeb.applyGeofences(state.devices,state.geofences);await persist();toast('Workspace importado sin secretos');}catch(error){toast('Importación bloqueada: '+error.message);}
   }
   function exportWorkspace(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='lucidfence-workspace.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),500);}
   async function init(){
     state=await WebStore.load();state={...LucidFenceWeb.initialState(),...state,agents:LucidFenceWeb.AGENTS};
-    $('#goalForm').addEventListener('submit',createGoal);$('#runCycle').addEventListener('click',runCycle);
+    $('#goalForm').addEventListener('submit',createGoal);$('#runCycle').addEventListener('click',runCycle);$('#quickGoal').addEventListener('click',quickGoal);$('#goalTemplate').addEventListener('change',applyGoalTemplate);applyGoalTemplate();
     $('#pauseBtn').addEventListener('click',async()=>{state.paused=!state.paused;await persist();toast(state.paused?'Compañía pausada':'Compañía reanudada');});
     $('#exportBtn').addEventListener('click',exportWorkspace);$('#resetBtn').addEventListener('click',async()=>{if(confirm('¿Eliminar el workspace guardado en este navegador?')){state=await WebStore.reset();render();toast('Workspace restablecido');}});
     $('#importFile').addEventListener('change',event=>{if(event.target.files[0])importWorkspace(event.target.files[0]);event.target.value='';});
@@ -120,7 +140,7 @@
     $('#cloudPull').addEventListener('click',pullCloud);
     $('#cloudPush').addEventListener('click',pushCloud);
     $('#cloudLogout').addEventListener('click',logoutCloud);
-    $('#cloudWorkspaceSelect').addEventListener('change',event=>{activeWorkspaceId=event.target.value;if(activeWorkspaceId)cloud.invalidate(activeWorkspaceId);renderCloud();toast('Descarga este workspace antes de subir cambios');});
+    $('#cloudWorkspaceSelect').addEventListener('change',async event=>{activeWorkspaceId=event.target.value;uemProviders=[];uemStatusMessage='';if(activeWorkspaceId){cloud.invalidate(activeWorkspaceId);try{uemProviders=await uem.status(activeWorkspaceId);}catch{uemProviders=[];uemStatusMessage='Este workspace aún no tiene credenciales UEM vinculadas.';}}renderCloud();toast('Workspace cambiado; descarga antes de subir cambios');});
     $('#saveGateway').addEventListener('click',async()=>{
       try{
         const value=$('#gatewayUrl').value.trim(),url=new URL(value);
@@ -136,25 +156,27 @@
         if(!response.ok)throw new Error('El gateway respondió HTTP '+response.status);
         const payload=LucidFenceWeb.sanitizeImport(await response.json());
         if(!Array.isArray(payload.devices)||payload.devices.length>10000)throw new Error('Respuesta de flota inválida');
-        state.devices=payload.devices;state.settings={...state.settings,mode:'live_gateway',lastSync:new Date().toISOString()};
+        state.devices=LucidFenceWeb.applyGeofences(payload.devices,state.geofences);state.settings={...state.settings,mode:'live_gateway',lastSync:new Date().toISOString()};
         await persist();toast(payload.devices.length+' dispositivos sincronizados desde tu gateway');showView('fleet');
       }catch(error){toast('Sincronización fallida: '+error.message);}
     });
-    $('#syncFleet').addEventListener('click',async()=>{
+    $('#syncAllUem').addEventListener('click',async()=>{
       try{
-        if(!cloudAvailable)throw new Error('El conector Fleet requiere el workspace cloud (Vercel + Supabase)');
-        const fleet=LucidFenceFleet.create(cloud,LucidFenceWeb.sanitizeImport);
-        const {devices,locationWarning}=await fleet.load();
-        if(!devices.length)throw new Error('Fleet no devolvió dispositivos');
-        state.devices=devices;state.settings={...state.settings,mode:'live_fleet',fleetReadOnly:true,lastSync:new Date().toISOString()};
-        await persist();toast(devices.length+' dispositivos Fleet sincronizados (solo lectura)');if(locationWarning)console.info('Fleet:',locationWarning);showView('fleet');
-      }catch(error){toast('Fleet: '+error.message);}
+        if(!cloudAvailable||!cloudUser)throw new Error('Inicia sesión cloud para sincronizar proveedores');
+        if(!activeWorkspaceId)throw new Error('Selecciona un workspace');
+        const result=await uem.sync('all',activeWorkspaceId);
+        uemProviders=uemProviders.map(item=>{const live=result.providers.find(status=>status.provider===item.id);return live?{...item,lastStatus:live.status,lastCount:live.count}:item;});
+        if(!result.devices.length)throw new Error('No hay proveedores configurados o no devolvieron dispositivos');
+        state.devices=LucidFenceWeb.applyGeofences(result.devices,state.geofences);state.settings={...state.settings,mode:'multi_uem',uemReadOnly:true,lastSync:new Date().toISOString()};
+        await persist();toast(result.devices.length+' dispositivos unificados desde '+result.providers.filter(p=>p.status==='ok').length+' proveedores');showView('fleet');
+      }catch(error){toast('Multi-UEM: '+error.message);}
     });
+    $('#syncAllUemSecondary').addEventListener('click',()=>$('#syncAllUem').click());
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
     cloud.detect().then(async available=>{cloudAvailable=available;await refreshCloudSession();}).catch(()=>{cloudAvailable=false;renderCloud();});
-    window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle};
+    window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle,quickGoal};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
   addEventListener('DOMContentLoaded',init);

@@ -62,15 +62,9 @@ SUPABASE_URL=https://TU_PROYECTO.supabase.co
 SUPABASE_PUBLISHABLE_KEY=[REDACTED]
 ```
 
-Para el conector FleetDM (opcional, solo lectura), añade también:
+Para Multi-UEM (opcional y siempre server-side), configura uno o varios proveedores con los nombres documentados en `.env.example`: FleetDM, Applivery, Intune, Jamf o un gateway compatible para Hexnode, Workspace ONE y ChromeOS.
 
-```text
-FLEET_URL=https://fleet.tuempresa.com
-FLEET_API_TOKEN=[REDACTED]
-FLEET_FLEET_ID=
-```
-
-El token de Fleet vive solo en el servidor. La PWA nunca lo recibe; el BFF `/api/fleet/hosts` devuelve dispositivos normalizados y no permite escrituras. GeoIP de Fleet es aproximado y jamás dispara acciones MDM.
+El navegador llama únicamente a `GET /api/uem` incluyendo el `workspaceId` activo. `UEM_ALLOWED_WORKSPACE_IDS` vincula las credenciales server-side a uno o varios UUID de workspace; el BFF comprueba además la membresía y exige rol `owner`, `admin` u `operator` mediante RLS. Sin binding falla cerrado. Después consulta en paralelo los proveedores configurados, tolera fallos parciales, deduplica por serial/IMEI y devuelve un inventario neutral de máximo 10 000 dispositivos. Todas las integraciones son read-only; no existen rutas de lock, wipe, scripts o comandos.
 
 La publishable key está diseñada para cliente público, pero aquí se usa server-side para que la PWA no dependa directamente de Supabase. Nunca configures `service_role`, `sb_secret_*`, la contraseña de Postgres ni un JWT secret.
 
