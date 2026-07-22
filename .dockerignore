@@ -1,0 +1,28 @@
+# Deny the entire build context by default. The Dockerfile copies only these static assets.
+**
+!index.html
+!web.html
+!web-core.js
+!web-store.js
+!web-cloud.js
+!web-app.js
+!web-worker.js
+!sw.js
+!runtime.json
+!manifest.webmanifest
+!lucidfence-icon.svg
+!.nojekyll
+!deploy/
+!deploy/nginx.conf
+
+# Explicit defence-in-depth exclusions.
+.git
+.env
+.env.*
+api
+supabase
+tests
+.github
+.hermes
+dist
+node_modules
