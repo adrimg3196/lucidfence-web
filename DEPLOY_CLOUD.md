@@ -41,6 +41,12 @@ npx supabase db push
 
 ```text
 supabase/migrations/202607210001_initial.sql
+supabase/migrations/202607220001_revision_conflict_status.sql
+supabase/migrations/202607220002_workspace_uem_connectors.sql
+supabase/migrations/202607220003_connector_server_proof.sql
+supabase/migrations/202607220004_exact_connector_envelope.sql
+supabase/migrations/202607220005_fix_connector_upsert_conflict.sql
+supabase/migrations/202607220006_dedicated_connector_rpc_secret.sql
 ```
 
 Después configura en Supabase Auth:
@@ -86,13 +92,28 @@ SUPABASE_PUBLISHABLE_KEY=[REDACTED]
 GOOGLE_SSO_ENABLED=true
 APP_ORIGIN=https://TU_DOMINIO
 OAUTH_COOKIE_SECRET=[REDACTED]
+UEM_SECRETS_ENCRYPTION_KEY=[REDACTED]
+UEM_CONNECTOR_RPC_SECRET=[REDACTED]
 ```
 
-`OAUTH_COOKIE_SECRET` debe contener al menos 32 bytes aleatorios y guardarse únicamente como secreto de Vercel (genera uno distinto por entorno). `APP_ORIGIN` debe ser el origen HTTPS canónico exacto (`https://host`): sin slash final, puerto explícito, punto final en el hostname, userinfo, ruta, query ni fragment. Si se omite, el backend usa únicamente la variable de sistema `VERCEL_URL` del deployment; nunca deriva callbacks de `Host` ni `X-Forwarded-Host`. Mantén `GOOGLE_SSO_ENABLED=false` en bundles locales/estáticos.
+`OAUTH_COOKIE_SECRET`, `UEM_SECRETS_ENCRYPTION_KEY` y `UEM_CONNECTOR_RPC_SECRET` deben ser valores independientes con al menos 32 bytes aleatorios. La clave `UEM_SECRETS_ENCRYPTION_KEY` cifra exclusivamente los sobres AES-256-GCM. `UEM_CONNECTOR_RPC_SECRET` autentica las llamadas internas BFF→RPC y su preimage solo vive en Vercel; Supabase conserva únicamente su SHA-256 público.
 
-Para Multi-UEM (opcional y siempre server-side), configura uno o varios proveedores con los nombres documentados en `.env.example`: FleetDM, Applivery, Intune, Jamf o un gateway compatible para Hexnode, Workspace ONE y ChromeOS.
+Antes de `supabase db push`, genera el secreto RPC una sola vez, añade ese mismo valor a Vercel y crea su migración verificadora sin imprimirlo:
 
-El navegador llama únicamente a `GET /api/uem` incluyendo el `workspaceId` activo. `UEM_ALLOWED_WORKSPACE_IDS` vincula las credenciales server-side a uno o varios UUID de workspace; el BFF comprueba además la membresía y exige rol `owner`, `admin` u `operator` mediante RLS. Sin binding falla cerrado. Después consulta en paralelo los proveedores configurados, tolera fallos parciales, deduplica por serial/IMEI y devuelve un inventario neutral de máximo 10 000 dispositivos. Todas las integraciones son read-only; no existen rutas de lock, wipe, scripts o comandos.
+```bash
+export UEM_CONNECTOR_RPC_SECRET="$(openssl rand -base64 32)"
+npm run connector:verifier -- --write
+npx supabase db push
+npm run connector:verifier
+```
+
+El primer comando mantiene el valor solo en la shell actual; añádelo a Preview y Production desde el gestor de secretos de Vercel antes de cerrar esa shell. `--write` crea una migración nueva y fechada; nunca reescribe una migración ya aplicada. El último comando falla si la variable y la última migración no coinciden. Repite este procedimiento al rotar el secreto RPC. Rotar `UEM_SECRETS_ENCRYPTION_KEY` es una operación distinta: obliga a volver a guardar los conectores porque los sobres anteriores fallan cerrados.
+
+`APP_ORIGIN` debe ser el origen HTTPS canónico exacto (`https://host`): sin slash final, puerto explícito, punto final en el hostname, userinfo, ruta, query ni fragment. Si se omite, el backend usa únicamente la variable de sistema `VERCEL_URL` del deployment; nunca deriva callbacks de `Host` ni `X-Forwarded-Host`. Mantén `GOOGLE_SSO_ENABLED=false` en bundles locales/estáticos.
+
+Para Multi-UEM, un owner o admin abre **Conectar** en el dashboard, elige FleetDM, Applivery, Intune, Jamf o un gateway compatible y pega una credencial de solo lectura. `PUT /api/uem/connectors` comprueba el rol antes de contactar al proveedor, valida la conexión real y solo entonces cifra con AES-256-GCM y AAD ligado a `workspaceId + provider`. Supabase guarda únicamente un sobre de tamaño fijo. Si la prueba falla, no se persiste nada. `GET /api/uem/connectors` devuelve esquema, estado, fecha e identidad no secreta del entorno —host, tenant u organización—; nunca devuelve plaintext, fingerprints del secreto ni ciphertext. Owner/admin pueden rotar o eliminar; operator puede sincronizar; viewer/auditor quedan sin capacidad de uso o gestión.
+
+`GET /api/uem` comprueba sesión, membresía y rol mediante RLS/RPC, descifra el sobre solo dentro de la función serverless y lo entrega en memoria al adaptador read-only. Consulta proveedores en paralelo, tolera fallos parciales, deduplica por serial/IMEI y limita la respuesta a 10 000 dispositivos. No existen rutas de lock, wipe, scripts o comandos. Las variables por proveedor de `.env.example` y `UEM_ALLOWED_WORKSPACE_IDS` permanecen solo como fallback legacy para despliegues administrados por el operador; no son necesarias cuando las credenciales se gestionan desde el dashboard.
 
 La publishable key está diseñada para cliente público, pero aquí se usa server-side para que la PWA no dependa directamente de Supabase. Nunca configures `service_role`, `sb_secret_*`, la contraseña de Postgres ni un JWT secret.
 
@@ -110,6 +131,11 @@ GET  /api/workspaces
 POST /api/workspaces
 GET  /api/workspaces/state?workspaceId=UUID
 PUT  /api/workspaces/state
+GET  /api/uem/connectors?workspaceId=UUID
+PUT  /api/uem/connectors
+DELETE /api/uem/connectors
+GET  /api/uem?provider=status&workspaceId=UUID
+GET  /api/uem?provider=all&workspaceId=UUID
 ```
 
 ## 3. Validación

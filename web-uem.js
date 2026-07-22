@@ -16,7 +16,17 @@
       catch { throw new UemError(400, 'uem_response_rejected', 'La respuesta UEM contiene campos no permitidos'); }
       return { devices: clean.devices, providers: payload.providers || [], readOnly: payload.readOnly === true };
     }
-    return Object.freeze({ status, sync });
+    async function connectors(workspaceId) {
+      const payload = await cloud.request(`/api/uem/connectors?workspaceId=${encodeURIComponent(workspaceId)}`);
+      return Array.isArray(payload?.connectors) ? payload.connectors : [];
+    }
+    async function saveConnector(workspaceId, provider, config) {
+      return cloud.request('/api/uem/connectors', { method: 'PUT', body: { workspaceId, provider, config } });
+    }
+    async function deleteConnector(workspaceId, provider) {
+      return cloud.request('/api/uem/connectors', { method: 'DELETE', body: { workspaceId, provider } });
+    }
+    return Object.freeze({ status, sync, connectors, saveConnector, deleteConnector });
   }
   root.LucidFenceUem = Object.freeze({ create, UemError });
 })(typeof globalThis !== 'undefined' ? globalThis : this);
