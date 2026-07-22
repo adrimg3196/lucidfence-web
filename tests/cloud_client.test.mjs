@@ -20,6 +20,18 @@ test('cloud detection stays local without a network request while offline', asyn
   }
 });
 
+test('cloud detection prefers the dynamic API runtime over the static fallback', async () => {
+  const calls = [];
+  const cloud = Cloud.create(async (url) => {
+    calls.push(url);
+    if (url === '/api/runtime') return new Response(JSON.stringify({ cloud: true, mode: 'central-saas' }), { status: 200 });
+    if (url === '/runtime.json') return new Response(JSON.stringify({ cloud: false, mode: 'local-first' }), { status: 200 });
+    return new Response('not found', { status: 404 });
+  });
+  assert.equal(await cloud.detect(), true);
+  assert.deepEqual(calls, ['/api/runtime']);
+});
+
 test('cloud detection fails open to local mode when the API is absent', async () => {
   const cloud = Cloud.create(async () => new Response('not found', { status: 404 }));
   assert.equal(await cloud.detect(), false);

@@ -41,9 +41,12 @@ test('GitHub Pages artifact remains local-only and includes the cloud-capable cl
   assert.doesNotMatch(workflow, /cp[^\n]*supabase\/migrations/);
 });
 
-test('static runtime descriptor disables cloud without a failed request', async () => {
+test('static runtime descriptor safely disables cloud after dynamic API fallback', async () => {
   const runtime = JSON.parse(await read('runtime.json'));
   assert.deepEqual(runtime, { cloud: false, mode: 'local-first' });
   const client = await read('web-cloud.js');
-  assert.match(client, /request\('\/runtime\.json'\)/);
+  const apiRuntime = client.indexOf("'/api/runtime'");
+  const staticRuntime = client.indexOf("'/runtime.json'");
+  assert.ok(apiRuntime >= 0);
+  assert.ok(staticRuntime > apiRuntime);
 });

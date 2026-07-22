@@ -32,11 +32,15 @@
 
     async function detect() {
       if(root.navigator?.onLine===false){session.available=false;return false;}
-      try {
-        const payload = await request('/runtime.json');
-        session.available = payload?.cloud === true;
-      } catch { session.available = false; }
-      return session.available;
+      for (const path of ['/api/runtime', '/runtime.json']) {
+        try {
+          const payload = await request(path);
+          session.available = payload?.cloud === true;
+          return session.available;
+        } catch {}
+      }
+      session.available = false;
+      return false;
     }
 
     async function login(email, password) {
