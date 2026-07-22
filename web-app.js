@@ -3,7 +3,7 @@
   let state=null;
   const cloud=LucidFenceCloud.create();
   const uem=LucidFenceUem.create(cloud,LucidFenceWeb.sanitizeImport);
-  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='';
+  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='',authGateVisible=false;
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -15,14 +15,55 @@
     if(location.hash!=='#'+id) history.replaceState(null,'','#'+id);
   }
   function evidenceCoverage(){const tasks=state.tasks||[];return tasks.length?Math.round(100*tasks.filter(t=>Array.isArray(t.evidence)&&t.evidence.length).length/tasks.length):100;}
+  function setAuthMode(mode){
+    const signup=mode==='signup';
+    $('#cloudLoginForm').classList.toggle('cloud-hidden',signup);
+    $('#cloudSignupForm').classList.toggle('cloud-hidden',!signup);
+    $('#cloudAuthLoginTab').setAttribute('aria-selected',String(!signup));
+    $('#cloudAuthLoginTab').tabIndex=signup?-1:0;
+    $('#cloudAuthSignupTab').setAttribute('aria-selected',String(signup));
+    $('#cloudAuthSignupTab').tabIndex=signup?0:-1;
+    $('#cloudAuthTitle').textContent=signup?'Crea tu organización':'Accede a tu organización';
+    $('#cloudAuthSubtitle').textContent=signup?'Configura un espacio seguro para tu equipo y tu flota.':'Continúa donde lo dejaste en tu espacio de operaciones.';
+    showAuthError('');
+    requestAnimationFrame(()=>$(signup?'#cloudSignupEmail':'#cloudLoginEmail').focus());
+  }
+  function setAuthBusy(form,busy){
+    const button=form.querySelector('button[type="submit"]');
+    form.setAttribute('aria-busy',String(busy));
+    button.disabled=busy;
+    button.textContent=busy?'Verificando acceso…':button.dataset.label;
+  }
+  function showAuthError(message,tone='error'){
+    const node=$('#cloudAuthError');
+    node.textContent=message||'';
+    node.classList.toggle('cloud-hidden',!message);
+    node.classList.toggle('success',tone==='success');
+    node.setAttribute('role',tone==='success'?'status':'alert');
+  }
+  function authMessage(error,mode){
+    if(error?.status===401)return 'Email o contraseña incorrectos. Revisa los datos e inténtalo de nuevo.';
+    if(error?.status===429)return 'Demasiados intentos. Espera un momento antes de volver a probar.';
+    if(error?.status===400||error?.status===422)return mode==='signup'?'No se pudo crear la cuenta. Revisa el email y la contraseña.':'Revisa el email y la contraseña.';
+    return 'No pudimos conectar con el servicio de acceso. Inténtalo de nuevo en unos segundos.';
+  }
   function renderCloud(){
+    const needsAuth=cloudAvailable&&!cloudUser,hasGoogle=needsAuth&&cloudOAuthProviders.some(provider=>provider.id==='google');
     $('#cloudUnavailable').classList.toggle('cloud-hidden',cloudAvailable);
-    $('#cloudAuth').classList.toggle('cloud-hidden',!cloudAvailable||Boolean(cloudUser));
+    $('#cloudAuth').classList.toggle('cloud-hidden',!needsAuth);
+    $('#cloudAuth').setAttribute('aria-hidden',String(!needsAuth));
+    const shell=$('.shell');
+    shell.inert=needsAuth;
+    shell.setAttribute('aria-hidden',String(needsAuth));
+    document.body.classList.toggle('cloud-auth-open',needsAuth);
     $('#cloudWorkspace').classList.toggle('cloud-hidden',!cloudAvailable||!cloudUser);
     $('#cloudModeTag').textContent=cloudAvailable?'CENTRAL SAAS':'LOCAL-FIRST';
     $('#cloudBadge').textContent=!cloudAvailable?'Cloud no configurado':cloudUser?'Cloud conectado':'Cloud disponible';
     $('#cloudUser').textContent=cloudUser?.email||'—';
-    $('#cloudGoogleSso').classList.toggle('cloud-hidden',!cloudAvailable||Boolean(cloudUser)||!cloudOAuthProviders.some(provider=>provider.id==='google'));
+    $('#cloudGoogleSso').classList.toggle('cloud-hidden',!hasGoogle);
+    $('#cloudSsoSection').classList.toggle('cloud-hidden',!hasGoogle);
+    if(needsAuth&&!authGateVisible)requestAnimationFrame(()=>$('#cloudLoginEmail').focus());
+    authGateVisible=needsAuth;
     const select=$('#cloudWorkspaceSelect'),previous=activeWorkspaceId;
     select.innerHTML=cloudWorkspaces.length?cloudWorkspaces.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(item.role)}</option>`).join(''):'<option value="">Crea el primer workspace</option>';
     if(cloudWorkspaces.some(item=>item.id===previous))select.value=previous;
@@ -40,13 +81,21 @@
   }
   async function loginCloud(event){
     event.preventDefault();
-    try{await cloud.login($('#cloudLoginEmail').value,$('#cloudLoginPassword').value);event.target.reset();await refreshCloudSession();toast('Sesión cloud iniciada');}
-    catch(error){toast('Login cloud: '+error.message);}
+    const form=event.currentTarget;
+    if(!form.reportValidity())return;
+    showAuthError('');setAuthBusy(form,true);
+    try{await cloud.login($('#cloudLoginEmail').value,$('#cloudLoginPassword').value);form.reset();await refreshCloudSession();toast('Sesión iniciada');}
+    catch(error){showAuthError(authMessage(error,'login'));}
+    finally{setAuthBusy(form,false);}
   }
   async function signupCloud(event){
     event.preventDefault();
-    try{const result=await cloud.signup($('#cloudSignupEmail').value,$('#cloudSignupPassword').value);event.target.reset();if(result.confirmationRequired){toast('Revisa tu email para confirmar la cuenta');return;}await refreshCloudSession();toast('Cuenta cloud creada');}
-    catch(error){toast('Alta cloud: '+error.message);}
+    const form=event.currentTarget;
+    if(!form.reportValidity())return;
+    showAuthError('');setAuthBusy(form,true);
+    try{const result=await cloud.signup($('#cloudSignupEmail').value,$('#cloudSignupPassword').value);form.reset();if(result.confirmationRequired){setAuthMode('login');showAuthError('Cuenta creada. Revisa tu email para confirmar el acceso.','success');return;}await refreshCloudSession();toast('Organización creada');}
+    catch(error){showAuthError(authMessage(error,'signup'));}
+    finally{setAuthBusy(form,false);}
   }
   async function createCloudWorkspace(){
     try{const workspace=await cloud.createWorkspace($('#cloudWorkspaceName').value);$('#cloudWorkspaceName').value='';cloudWorkspaces=await cloud.listWorkspaces();activeWorkspaceId=workspace.id;await cloud.pull(activeWorkspaceId);try{uemProviders=await uem.status(activeWorkspaceId);uemStatusMessage='';}catch{uemProviders=[];uemStatusMessage='Este workspace aún no tiene credenciales UEM vinculadas.';}renderCloud();toast('Workspace cloud creado');}
@@ -138,6 +187,8 @@
     $('#importFile').addEventListener('change',event=>{if(event.target.files[0])importWorkspace(event.target.files[0]);event.target.value='';});
     $('#cloudLoginForm').addEventListener('submit',loginCloud);
     $('#cloudSignupForm').addEventListener('submit',signupCloud);
+    $('#cloudAuthLoginTab').addEventListener('click',()=>setAuthMode('login'));
+    $('#cloudAuthSignupTab').addEventListener('click',()=>setAuthMode('signup'));
     $('#cloudCreateWorkspace').addEventListener('click',createCloudWorkspace);
     $('#cloudPull').addEventListener('click',pullCloud);
     $('#cloudPush').addEventListener('click',pushCloud);
@@ -177,8 +228,7 @@
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
-    if(oauthFailed)toast('No se pudo iniciar sesión con Google. Inténtalo de nuevo.');
-    cloud.detect().then(async available=>{cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();}).catch(()=>{cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
+    cloud.detect().then(async available=>{cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();if(oauthFailed&&cloudAvailable){setAuthMode('login');showAuthError('No pudimos completar el acceso con Google. Inténtalo de nuevo.');}}).catch(()=>{cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
     window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle,quickGoal};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
