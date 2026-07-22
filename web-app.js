@@ -3,7 +3,7 @@
   let state=null;
   const cloud=LucidFenceCloud.create();
   const uem=LucidFenceUem.create(cloud,LucidFenceWeb.sanitizeImport);
-  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='';
+  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='';
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -22,6 +22,7 @@
     $('#cloudModeTag').textContent=cloudAvailable?'CENTRAL SAAS':'LOCAL-FIRST';
     $('#cloudBadge').textContent=!cloudAvailable?'Cloud no configurado':cloudUser?'Cloud conectado':'Cloud disponible';
     $('#cloudUser').textContent=cloudUser?.email||'—';
+    $('#cloudGoogleSso').classList.toggle('cloud-hidden',!cloudAvailable||Boolean(cloudUser)||!cloudOAuthProviders.some(provider=>provider.id==='google'));
     const select=$('#cloudWorkspaceSelect'),previous=activeWorkspaceId;
     select.innerHTML=cloudWorkspaces.length?cloudWorkspaces.map(item=>`<option value="${esc(item.id)}">${esc(item.name)} · ${esc(item.role)}</option>`).join(''):'<option value="">Crea el primer workspace</option>';
     if(cloudWorkspaces.some(item=>item.id===previous))select.value=previous;
@@ -30,7 +31,7 @@
     $('#cloudPush').disabled=!activeWorkspaceId||!cloud.canPush(activeWorkspaceId);
   }
   async function refreshCloudSession(){
-    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];uemProviders=[];uemStatusMessage='';renderCloud();return;}
+    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];cloudOAuthProviders=[];uemProviders=[];uemStatusMessage='';renderCloud();return;}
     cloudUser=await cloud.me();
     cloudWorkspaces=cloudUser?await cloud.listWorkspaces():[];
     if(!cloudWorkspaces.some(item=>item.id===activeWorkspaceId))activeWorkspaceId=cloudWorkspaces[0]?.id||'';
@@ -129,6 +130,7 @@
   }
   function exportWorkspace(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='lucidfence-workspace.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),500);}
   async function init(){
+    const oauthFailed=LucidFenceCloud.consumeAuthError();
     state=await WebStore.load();state={...LucidFenceWeb.initialState(),...state,agents:LucidFenceWeb.AGENTS};
     $('#goalForm').addEventListener('submit',createGoal);$('#runCycle').addEventListener('click',runCycle);$('#quickGoal').addEventListener('click',quickGoal);$('#goalTemplate').addEventListener('change',applyGoalTemplate);applyGoalTemplate();
     $('#pauseBtn').addEventListener('click',async()=>{state.paused=!state.paused;await persist();toast(state.paused?'Compañía pausada':'Compañía reanudada');});
@@ -175,7 +177,8 @@
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
-    cloud.detect().then(async available=>{cloudAvailable=available;await refreshCloudSession();}).catch(()=>{cloudAvailable=false;renderCloud();});
+    if(oauthFailed)toast('No se pudo iniciar sesión con Google. Inténtalo de nuevo.');
+    cloud.detect().then(async available=>{cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();}).catch(()=>{cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
     window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle,quickGoal};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }

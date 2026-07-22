@@ -19,6 +19,9 @@ test('environment template contains placeholders only and never requests service
   const env = await read('.env.example');
   assert.match(env, /^SUPABASE_URL=/m);
   assert.match(env, /^SUPABASE_PUBLISHABLE_KEY=/m);
+  assert.match(env, /^GOOGLE_SSO_ENABLED=false$/m);
+  assert.match(env, /^APP_ORIGIN=https:\/\//m);
+  assert.match(env, /^OAUTH_COOKIE_SECRET=\[REDACTED\]$/m);
   assert.doesNotMatch(env, /SERVICE_ROLE|DATABASE_URL|JWT_SECRET/);
   assert.match(env, /\[REDACTED\]/);
 });
@@ -26,6 +29,15 @@ test('environment template contains placeholders only and never requests service
 test('cloud deployment guide keeps central and customer-owned infrastructure separate', async () => {
   const guide = await read('DEPLOY_CLOUD.md');
   for (const text of ['Infraestructura central', 'Infraestructura del cliente', 'supabase db push', 'Vercel Hobby', 'uso no comercial', 'RLS', 'HttpOnly']) assert.ok(guide.includes(text));
+});
+
+test('cloud guide documents the exact Google and Supabase callback allowlists', async () => {
+  const guide = await read('DEPLOY_CLOUD.md');
+  assert.match(guide, /\$\{SUPABASE_URL\}\/auth\/v1\/callback/);
+  assert.match(guide, /https:\/\/TU_DOMINIO\/api\/auth\/oauth\/callback/);
+  assert.match(guide, /GOOGLE_SSO_ENABLED/);
+  assert.match(guide, /OAUTH_COOKIE_SECRET/);
+  assert.match(guide, /APP_ORIGIN/);
 });
 
 test('CI runs cloud contracts without requiring credentials', async () => {

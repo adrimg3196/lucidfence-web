@@ -11,13 +11,15 @@ test('PWA exposes local and central-cloud modes without making cloud mandatory',
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.ok(html.indexOf('web-cloud.js') < html.indexOf('web-app.js'));
+  assert.match(html, /id="cloudGoogleSso"[^>]*href="\/api\/auth\/oauth\/start\?provider=google"/);
+  assert.match(html, /id="cloudGoogleSso"[^>]*cloud-hidden/);
 });
 
 test('frontend binds auth and prevents cross-workspace push without pull', async () => {
   const source = await read('web-app.js');
   for (const fragment of [
     'LucidFenceCloud.create()', '.detect()', '.login(', '.signup(', '.logout()',
-    '.listWorkspaces()', '.createWorkspace(', '.pull(', '.push('
+    '.listWorkspaces()', '.createWorkspace(', '.pull(', '.push(', '.oauthProviders()', 'consumeAuthError('
   ]) assert.ok(source.includes(fragment), `missing ${fragment}`);
   assert.match(source, /cloud\.invalidate\(activeWorkspaceId\)/);
   assert.match(source, /cloud\.canPush\(activeWorkspaceId\)/);

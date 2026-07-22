@@ -51,6 +51,22 @@ Después configura en Supabase Auth:
 - SMTP propio: recomendado antes de producción.
 - MFA de la cuenta propietaria: activado.
 
+### Google SSO mediante Supabase Auth (opcional)
+
+Supabase Auth actúa como broker OIDC: Vercel no recibe ni valida directamente un Google ID token. En Google Cloud Console habilita el proveedor OAuth de Supabase y registra como **Authorized redirect URI** exactamente:
+
+```text
+${SUPABASE_URL}/auth/v1/callback
+```
+
+En Supabase, activa Google en **Authentication > Providers** con las credenciales de Google. En **Authentication > URL Configuration**, añade a la allowlist de redirect URLs cada callback de LucidFence que vayas a servir, por ejemplo:
+
+```text
+https://TU_DOMINIO/api/auth/oauth/callback
+```
+
+Para previews, añade cada dominio de preview autorizado de forma explícita. El callback debe coincidir con `APP_ORIGIN`; no uses comodines amplios en producción.
+
 ## 2. Crear Vercel
 
 Importa este repositorio en la cuenta Vercel propietaria de la instancia.
@@ -60,7 +76,12 @@ Añade únicamente:
 ```text
 SUPABASE_URL=https://TU_PROYECTO.supabase.co
 SUPABASE_PUBLISHABLE_KEY=[REDACTED]
+GOOGLE_SSO_ENABLED=true
+APP_ORIGIN=https://TU_DOMINIO
+OAUTH_COOKIE_SECRET=[REDACTED]
 ```
+
+`OAUTH_COOKIE_SECRET` debe contener al menos 32 bytes aleatorios y guardarse únicamente como secreto de Vercel (genera uno distinto por entorno). `APP_ORIGIN` debe ser el origen HTTPS exacto, sin ruta ni query. Si se omite, el backend usa únicamente la variable de sistema `VERCEL_URL` del deployment; nunca deriva callbacks de `Host` ni `X-Forwarded-Host`. Mantén `GOOGLE_SSO_ENABLED=false` en bundles locales/estáticos.
 
 Para Multi-UEM (opcional y siempre server-side), configura uno o varios proveedores con los nombres documentados en `.env.example`: FleetDM, Applivery, Intune, Jamf o un gateway compatible para Hexnode, Workspace ONE y ChromeOS.
 
@@ -72,6 +93,9 @@ Despliega y verifica:
 
 ```text
 GET  /api/runtime
+GET  /api/auth/oauth/providers
+GET  /api/auth/oauth/start?provider=google
+GET  /api/auth/oauth/callback
 POST /api/auth/signup
 POST /api/auth/login
 GET  /api/auth/me

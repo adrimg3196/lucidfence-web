@@ -55,6 +55,13 @@
       return payload;
     }
 
+    async function oauthProviders() {
+      const payload = await request('/api/auth/oauth/providers');
+      return Array.isArray(payload?.providers)
+        ? payload.providers.filter(provider => provider?.id === 'google' && provider?.label === 'Google')
+        : [];
+    }
+
     async function me() {
       try { const payload = await request('/api/auth/me'); session.user = payload.user; return session.user; }
       catch (error) { if (error.status === 401) session.user = null; else throw error; return null; }
@@ -97,8 +104,20 @@
     function canPush(workspaceId) { return Number.isSafeInteger(revisions.get(workspaceId)); }
     function status() { return { available: session.available, user: session.user, revisions: Object.fromEntries(revisions) }; }
 
-    return { detect, login, signup, me, logout, listWorkspaces, createWorkspace, pull, push, invalidate, canPush, status, request };
+    return { detect, login, signup, oauthProviders, me, logout, listWorkspaces, createWorkspace, pull, push, invalidate, canPush, status, request };
   }
 
-  root.LucidFenceCloud = Object.freeze({ create, CloudError });
+  function consumeAuthError(locationLike = root.location, historyLike = root.history) {
+    if (!locationLike?.href || typeof historyLike?.replaceState !== 'function') return false;
+    let url;
+    try { url = new URL(locationLike.href); } catch { return false; }
+    const failed = url.searchParams.get('auth_error') === 'sso_failed';
+    if (!url.searchParams.has('auth_error')) return false;
+    url.searchParams.delete('auth_error');
+    const clean = `${url.pathname}${url.search}${url.hash}`;
+    historyLike.replaceState(null, '', clean);
+    return failed;
+  }
+
+  root.LucidFenceCloud = Object.freeze({ create, CloudError, consumeAuthError });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

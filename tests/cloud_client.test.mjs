@@ -53,6 +53,28 @@ test('login uses same-origin credentials and never returns or stores tokens', as
   assert.doesNotMatch(source, /localStorage|sessionStorage|access_token|refresh_token/);
 });
 
+test('OAuth providers are discovered through the same-origin BFF', async () => {
+  const calls = [];
+  const cloud = Cloud.create(async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ providers: [{ id: 'google', label: 'Google' }] }), { status: 200 });
+  });
+  const providers = await cloud.oauthProviders();
+  assert.deepEqual(providers, [{ id: 'google', label: 'Google' }]);
+  assert.equal(calls[0].url, '/api/auth/oauth/providers');
+  assert.equal(calls[0].options.credentials, 'include');
+});
+
+test('OAuth callback error is generic and removed from browser history', () => {
+  let replacement = '';
+  const location = { href: 'https://app.example/?auth_error=sso_failed#connect' };
+  const history = { replaceState(_state, _title, value) { replacement = value; } };
+  assert.equal(Cloud.consumeAuthError(location, history), true);
+  assert.equal(replacement, '/#connect');
+  assert.doesNotMatch(replacement, /auth_error|code|state|message/);
+  assert.equal(Cloud.consumeAuthError({ href: 'https://app.example/?auth_error=unexpected' }, history), false);
+});
+
 test('workspace pull and push track the server revision', async () => {
   const calls = [];
   const cloud = Cloud.create(async (url, options) => {
