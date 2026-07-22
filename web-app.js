@@ -3,7 +3,7 @@
   let state=null;
   const cloud=LucidFenceCloud.create();
   const uem=LucidFenceUem.create(cloud,LucidFenceWeb.sanitizeImport);
-  let cloudAvailable=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='',authGateVisible=false;
+  let cloudAvailable=false,cloudResolved=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemStatusMessage='',authGateVisible=false;
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -48,13 +48,14 @@
     return 'No pudimos conectar con el servicio de acceso. Inténtalo de nuevo en unos segundos.';
   }
   function renderCloud(){
-    const needsAuth=cloudAvailable&&!cloudUser,hasGoogle=needsAuth&&cloudOAuthProviders.some(provider=>provider.id==='google');
+    const needsAuth=cloudResolved&&cloudAvailable&&!cloudUser,hasGoogle=needsAuth&&cloudOAuthProviders.some(provider=>provider.id==='google');
+    $('#cloudBoot').classList.toggle('cloud-hidden',cloudResolved);
     $('#cloudUnavailable').classList.toggle('cloud-hidden',cloudAvailable);
     $('#cloudAuth').classList.toggle('cloud-hidden',!needsAuth);
     $('#cloudAuth').setAttribute('aria-hidden',String(!needsAuth));
     const shell=$('.shell');
-    shell.inert=needsAuth;
-    shell.setAttribute('aria-hidden',String(needsAuth));
+    shell.inert=!cloudResolved||needsAuth;
+    shell.setAttribute('aria-hidden',String(!cloudResolved||needsAuth));
     document.body.classList.toggle('cloud-auth-open',needsAuth);
     $('#cloudWorkspace').classList.toggle('cloud-hidden',!cloudAvailable||!cloudUser);
     $('#cloudModeTag').textContent=cloudAvailable?'CENTRAL SAAS':'LOCAL-FIRST';
@@ -228,7 +229,7 @@
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
-    cloud.detect().then(async available=>{cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();if(oauthFailed&&cloudAvailable){setAuthMode('login');showAuthError('No pudimos completar el acceso con Google. Inténtalo de nuevo.');}}).catch(()=>{cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
+    cloud.detect().then(async available=>{cloudResolved=true;cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();if(oauthFailed&&cloudAvailable){setAuthMode('login');showAuthError('No pudimos completar el acceso con Google. Inténtalo de nuevo.');}}).catch(()=>{cloudResolved=true;cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
     window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle,quickGoal};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
