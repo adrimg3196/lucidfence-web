@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 process.env.SUPABASE_URL='https://project.supabase.co';
 process.env.SUPABASE_PUBLISHABLE_KEY='sb_publishable_example';
 process.env.UEM_ALLOWED_WORKSPACE_IDS='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+process.env.UEM_SECRETS_ENCRYPTION_KEY=Buffer.alloc(32,10).toString('base64');
+process.env.UEM_CONNECTOR_RPC_SECRET=Buffer.alloc(32,20).toString('base64');
 
 const WORKSPACE='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 function req(method='GET',query={provider:'status',workspaceId:WORKSPACE},cookie='lf_access=user-access; lf_refresh=user-refresh'){
@@ -21,14 +23,32 @@ test('Multi-UEM BFF requires an authenticated cloud session',async()=>{
   const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req('GET',undefined,''),response);assert.equal(response.statusCode,401);assert.equal(JSON.parse(response.body).error,'authentication_required');
 });
 
-test('Multi-UEM status checks allowlist and workspace RBAC before returning metadata',async()=>{
-  const original=globalThis.fetch;let calls=0;globalThis.fetch=async url=>{calls+=1;return String(url).endsWith('/auth/v1/user')?authUser():membership('owner');};
-  try{const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req(),response);assert.equal(response.statusCode,200);const payload=JSON.parse(response.body);assert.equal(payload.readOnly,true);assert.ok(payload.providers.length>=8);assert.equal(calls,2);assert.ok(!JSON.stringify(payload).match(/client_secret|api_token|Bearer /i));}finally{globalThis.fetch=original;}
+test('Multi-UEM status checks workspace RBAC and managed connectors before returning metadata',async()=>{
+  const original=globalThis.fetch;let calls=0;globalThis.fetch=async url=>{calls+=1;if(String(url).endsWith('/auth/v1/user'))return authUser();if(String(url).includes('workspace_members'))return membership('owner');return new Response(JSON.stringify([{provider:'fleetdm',config_hint:'fleet.example · ID 10478037',updated_at:'2026-07-22T17:00:00Z'}]),{status:200,headers:{'content-type':'application/json'}});};
+  try{const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req(),response);assert.equal(response.statusCode,200);const payload=JSON.parse(response.body);assert.equal(payload.readOnly,true);assert.equal(payload.managedCredentials,true);assert.ok(payload.providers.length>=8);assert.equal(payload.providers.find(item=>item.id==='fleetdm').source,'workspace');assert.equal(calls,3);assert.ok(!JSON.stringify(payload).match(/client_secret|api_token|Bearer /i));}finally{globalThis.fetch=original;}
 });
 
-test('Multi-UEM BFF denies a different tenant before provider or membership access',async()=>{
-  const original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls+=1;return authUser();};
-  try{const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req('GET',{provider:'status',workspaceId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}),response);assert.equal(response.statusCode,403);assert.equal(JSON.parse(response.body).error,'workspace_connector_denied');assert.equal(calls,1);}finally{globalThis.fetch=original;}
+test('managed synchronization sends server proof only to the sealed-config RPC',async()=>{
+  const original=globalThis.fetch,calls=[];
+  const {sealConnectorConfig}=await import('../api/_lib/connectors.js');
+  const sealed=sealConnectorConfig({baseUrl:'https://example.com',apiToken:'managed-token-123'},WORKSPACE,'fleetdm');
+  globalThis.fetch=async(url,options={})=>{
+    calls.push({url:String(url),body:String(options.body||'')});
+    if(String(url).endsWith('/auth/v1/user'))return authUser();
+    if(String(url).includes('workspace_members'))return membership('operator');
+    if(String(url).includes('load_workspace_uem_connector'))return new Response(JSON.stringify([{provider:'fleetdm',sealed_config:sealed}]),{status:200,headers:{'content-type':'application/json'}});
+    return new Response(JSON.stringify({hosts:[],meta:{has_next_results:false}}),{status:200,headers:{'content-type':'application/json'}});
+  };
+  try{
+    const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req('GET',{provider:'fleetdm',workspaceId:WORKSPACE}),response);
+    assert.equal(response.statusCode,200);const rpc=JSON.parse(calls.find(call=>call.url.includes('load_workspace_uem_connector')).body);
+    assert.match(rpc.connector_server_proof,/^[A-Za-z0-9_-]{43}$/);assert.doesNotMatch(response.body,/server_proof|sealed_config|managed-token/);
+  }finally{globalThis.fetch=original;}
+});
+
+test('Multi-UEM BFF denies a different tenant membership before connector storage access',async()=>{
+  const original=globalThis.fetch;let calls=0;globalThis.fetch=async url=>{calls+=1;return String(url).endsWith('/auth/v1/user')?authUser():membership('viewer');};
+  try{const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req('GET',{provider:'status',workspaceId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}),response);assert.equal(response.statusCode,403);assert.equal(JSON.parse(response.body).error,'workspace_role_denied');assert.equal(calls,2);}finally{globalThis.fetch=original;}
 });
 
 test('Multi-UEM BFF denies viewer role',async()=>{

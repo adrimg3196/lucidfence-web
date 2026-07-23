@@ -7,12 +7,14 @@ const read = name => readFile(new URL(name, root), 'utf8');
 
 test('Vercel config serves the PWA and applies security headers', async () => {
   const config = JSON.parse(await read('vercel.json'));
+  assert.ok(config.rewrites.some(rule => rule.source === '/api/uem/connectors' && rule.destination === '/api/uem?resource=connectors'));
   assert.ok(config.rewrites.some(rule => rule.source === '/' && rule.destination === '/index.html'));
   assert.ok(config.rewrites.some(rule => rule.source === '/runtime.json' && rule.destination === '/api/runtime'));
   const serialized = JSON.stringify(config);
   for (const header of ['Content-Security-Policy', 'X-Content-Type-Options', 'X-Frame-Options', 'Referrer-Policy', 'Permissions-Policy']) assert.ok(serialized.includes(header));
   assert.match(serialized, /connect-src 'self' https:/);
   assert.match(serialized, /Cache-Control/);
+  assert.ok(config.functions['api/**/*.js'].maxDuration >= 20);
 });
 
 test('environment template contains placeholders only and never requests service role', async () => {
@@ -22,6 +24,7 @@ test('environment template contains placeholders only and never requests service
   assert.match(env, /^GOOGLE_SSO_ENABLED=false$/m);
   assert.match(env, /^APP_ORIGIN=https:\/\//m);
   assert.match(env, /^OAUTH_COOKIE_SECRET=\[REDACTED\]$/m);
+  assert.match(env, /^UEM_SECRETS_ENCRYPTION_KEY=\[REDACTED\]$/m);
   assert.doesNotMatch(env, /SERVICE_ROLE|DATABASE_URL|JWT_SECRET/);
   assert.match(env, /\[REDACTED\]/);
 });
@@ -66,4 +69,9 @@ test('Supabase guide uses a pinned local CLI through npx', async () => {
   assert.match(guide, /npm install --save-dev supabase@/);
   assert.match(guide, /npx supabase db push/);
   assert.doesNotMatch(guide, /npm install --global supabase/);
+});
+
+test('cloud guide lists every connector migration through the dedicated RPC verifier', async () => {
+  const guide = await read('DEPLOY_CLOUD.md');
+  for (const migration of ['202607220003_connector_server_proof.sql','202607220004_exact_connector_envelope.sql','202607220005_fix_connector_upsert_conflict.sql','202607220006_dedicated_connector_rpc_secret.sql']) assert.ok(guide.includes(migration), migration);
 });

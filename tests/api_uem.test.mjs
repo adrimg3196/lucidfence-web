@@ -74,7 +74,7 @@ test('mergeDevices prefers precise MDM coordinates over coarse evidence', () => 
 });
 
 test('provider URL validation blocks SSRF-style configuration', () => {
-  for (const unsafe of ['http://127.0.0.1:9000','https://127.0.0.1','https://localhost','https://169.254.169.254','https://10.0.0.1','https://192.168.1.2','https://[::1]']) {
+  for (const unsafe of ['http://127.0.0.1:9000','https://127.0.0.1','https://localhost','https://169.254.169.254','https://10.0.0.1','https://100.64.0.1','https://192.0.2.1','https://192.88.99.1','https://198.18.0.1','https://203.0.113.1','https://192.168.1.2','https://[::1]','https://[2001:db8::1]','https://[3fff::1]']) {
     assert.throws(() => validateProviderUrl(unsafe, 'fleetdm', false), /public HTTPS/);
   }
   assert.throws(() => validateProviderUrl('https://user:pass@example.com', 'jamf', false), /public HTTPS/);
@@ -89,8 +89,11 @@ test('DNS resolution blocks public-looking hostnames that resolve privately', as
     () => assertPublicResolution(parsed,'fleetdm',async()=>[{address:'127.0.0.1',family:4}]),
     error => error?.code === 'private_provider_address'
   );
-  await assert.rejects(() => assertPublicResolution(parsed,'fleetdm',async()=>[{address:'fc00::1',family:6}]),error=>error?.code==='private_provider_address');
+  for(const address of ['100.64.0.1','192.0.0.1','192.0.2.1','192.88.99.1','192.88.99.255','198.18.0.1','198.51.100.1','203.0.113.1','224.0.0.1','240.0.0.1','2001:2::1','2001:db8::1','2002::1','3fff::1','fc00::1','fe80::1','ff00::1']){
+    await assert.rejects(()=>assertPublicResolution(parsed,'fleetdm',async()=>[{address,family:address.includes(':')?6:4}]),error=>error?.code==='private_provider_address',address);
+  }
   await assert.rejects(() => assertPublicResolution(parsed,'fleetdm',async()=>[{address:'::ffff:127.0.0.1',family:6}]),error=>error?.code==='private_provider_address');
+  await assert.doesNotReject(() => assertPublicResolution(parsed,'fleetdm',async()=>[{address:'8.8.8.8',family:4}]));
   await assert.doesNotReject(() => assertPublicResolution(parsed,'fleetdm',async()=>[{address:'2606:4700:4700::1111',family:6}]));
 });
 

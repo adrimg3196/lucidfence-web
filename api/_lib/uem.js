@@ -15,14 +15,50 @@ export class UemProviderError extends Error {
   }
 }
 
+function ipv4Number(value) {
+  const parts=String(value||'').split('.').map(Number);
+  if(parts.length!==4||parts.some(part=>!Number.isInteger(part)||part<0||part>255))return null;
+  return parts.reduce((total,part)=>(total*256)+part,0)>>>0;
+}
+
+const NON_GLOBAL_IPV4=Object.freeze([
+  ['0.0.0.0',8],['10.0.0.0',8],['100.64.0.0',10],['127.0.0.0',8],['169.254.0.0',16],
+  ['172.16.0.0',12],['192.0.0.0',24],['192.0.2.0',24],['192.88.99.0',24],['192.168.0.0',16],['198.18.0.0',15],
+  ['198.51.100.0',24],['203.0.113.0',24],['224.0.0.0',4],['240.0.0.0',4]
+].map(([address,bits])=>[ipv4Number(address),bits]));
+
+function inIpv4Subnet(value,base,bits){const mask=bits===0?0:(0xffffffff<<(32-bits))>>>0;return (value&mask)===(base&mask);}
+function ipv6Number(value){
+  let raw=String(value||'').toLowerCase().split('%')[0];
+  if(raw.includes('.')){const last=raw.slice(raw.lastIndexOf(':')+1),v4=ipv4Number(last);if(v4===null)return null;raw=raw.slice(0,raw.lastIndexOf(':'))+':'+((v4>>>16)&0xffff).toString(16)+':'+(v4&0xffff).toString(16);}
+  const halves=raw.split('::');if(halves.length>2)return null;
+  const left=halves[0]?halves[0].split(':'):[],right=halves.length===2&&halves[1]?halves[1].split(':'):[];
+  const fill=8-left.length-right.length;if(fill<(halves.length===2?1:0))return null;
+  const groups=halves.length===2?[...left,...Array(fill).fill('0'),...right]:left;if(groups.length!==8||groups.some(group=>!/^[0-9a-f]{1,4}$/.test(group)))return null;
+  return groups.reduce((total,group)=>(total<<16n)+BigInt(Number.parseInt(group,16)),0n);
+}
+function inIpv6Subnet(value,base,bits){const shift=128n-BigInt(bits);return (value>>shift)===(base>>shift);}
+const NON_GLOBAL_IPV6=Object.freeze([
+  ['::',128],['::1',128],['64:ff9b:1::',48],['100::',64],['2001::',23],['2001:db8::',32],
+  ['2002::',16],['3fff::',20],['fc00::',7],['fe80::',10],['ff00::',8]
+].map(([address,bits])=>[ipv6Number(address),bits]));
+
+function nonGlobalAddress(address) {
+  const value=String(address||'').toLowerCase();
+  if(value.startsWith('::ffff:'))return nonGlobalAddress(value.slice(7));
+  const v4=ipv4Number(value);if(v4!==null)return NON_GLOBAL_IPV4.some(([base,bits])=>inIpv4Subnet(v4,base,bits));
+  const v6=ipv6Number(value);if(v6===null)return true;
+  const globalUnicast=inIpv6Subnet(v6,ipv6Number('2000::'),3);
+  return !globalUnicast||NON_GLOBAL_IPV6.some(([base,bits])=>inIpv6Subnet(v6,base,bits));
+}
+
 export function validateProviderUrl(value, provider, allowPath = true) {
   let parsed;
   try { parsed = new URL(String(value || '')); }
   catch { throw new UemProviderError(provider, 'invalid_provider_url', `${provider} URL is invalid`, 500); }
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)?.slice(1).map(Number);
-  const privateIpv4 = ipv4 && (ipv4.some(part => part > 255) || ipv4[0] === 0 || ipv4[0] === 10 || ipv4[0] === 127 || (ipv4[0] === 169 && ipv4[1] === 254) || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) || (ipv4[0] === 192 && ipv4[1] === 168) || ipv4[0] >= 224);
-  const privateHost = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.includes(':') || privateIpv4;
+  const literalAddress=ipv4Number(host)!==null||host.includes(':');
+  const privateHost = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || (literalAddress&&nonGlobalAddress(host));
   if (parsed.protocol !== 'https:' || privateHost || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new UemProviderError(provider, 'invalid_provider_url', `${provider} URL must use public HTTPS without credentials, query or fragment`, 500);
   }
@@ -30,25 +66,12 @@ export function validateProviderUrl(value, provider, allowPath = true) {
   return parsed;
 }
 
-function privateResolvedAddress(address) {
-  const value = String(address || '').toLowerCase();
-  if (value.includes(':')) {
-    if (value.startsWith('::ffff:')) return privateResolvedAddress(value.slice(7));
-    if (value === '::' || value === '::1') return true;
-    const first = Number.parseInt(value.split(':')[0] || '0', 16);
-    return !Number.isInteger(first) || first < 0x2000 || first > 0x3fff;
-  }
-  const parts = value.split('.').map(Number);
-  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168) || parts[0] >= 224;
-}
-
 export async function assertPublicResolution(parsed, provider, resolver = dnsLookup) {
   let records;
   try { records = await resolver(parsed.hostname, { all: true, verbatim: true }); }
   catch { throw new UemProviderError(provider, 'provider_dns_failed', `${provider} hostname could not be resolved`, 502); }
   const rows = Array.isArray(records) ? records : [records];
-  if (!rows.length || rows.some(record => privateResolvedAddress(record?.address))) {
+  if (!rows.length || rows.some(record => nonGlobalAddress(record?.address))) {
     throw new UemProviderError(provider, 'private_provider_address', `${provider} resolved to a non-public address`, 500);
   }
   return rows.map(record => ({ address: String(record.address), family: Number(record.family) || (String(record.address).includes(':') ? 6 : 4) }));

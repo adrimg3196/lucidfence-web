@@ -3,6 +3,7 @@
   "cleanUrls": false,
   "trailingSlash": false,
   "rewrites": [
+    { "source": "/api/uem/connectors", "destination": "/api/uem?resource=connectors" },
     { "source": "/runtime.json", "destination": "/api/runtime" },
     { "source": "/", "destination": "/index.html" }
   ],
@@ -34,6 +35,6 @@
     }
   ],
   "functions": {
-    "api/**/*.js": { "maxDuration": 10 }
+    "api/**/*.js": { "maxDuration": 20 }
   }
 }
