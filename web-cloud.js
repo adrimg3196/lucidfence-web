@@ -40,6 +40,9 @@
         } catch {}
       }
       session.available = false;
+      if (String(root.location?.hostname || '').toLowerCase() === 'lucidfence-web.vercel.app') {
+        throw new CloudError(503, 'cloud_detection_failed', 'Central cloud detection failed');
+      }
       return false;
     }
 

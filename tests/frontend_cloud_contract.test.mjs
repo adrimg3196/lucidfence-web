@@ -11,6 +11,7 @@ test('PWA exposes a dedicated SaaS auth shell without making cloud mandatory', a
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.ok(html.indexOf('web-cloud.js') < html.indexOf('web-app.js'));
+  assert.match(html, /<body class="cloud-pending">/);
   assert.match(html, /id="cloudAuth"[^>]*cloud-auth-gate[^>]*cloud-hidden/);
   assert.match(html, /id="cloudAuthDialog"[^>]*role="dialog"[^>]*aria-modal="true"/);
   assert.match(html, /id="cloudGoogleSso"[^>]*href="\/api\/auth\/oauth\/start\?provider=google"/);

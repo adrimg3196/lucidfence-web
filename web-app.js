@@ -57,6 +57,7 @@
     shell.inert=!cloudResolved||needsAuth;
     shell.setAttribute('aria-hidden',String(!cloudResolved||needsAuth));
     document.body.classList.toggle('cloud-auth-open',needsAuth);
+    document.body.classList.toggle('cloud-pending',!cloudResolved);
     $('#cloudWorkspace').classList.toggle('cloud-hidden',!cloudAvailable||!cloudUser);
     $('#cloudModeTag').textContent=cloudAvailable?'CENTRAL SAAS':'LOCAL-FIRST';
     $('#cloudBadge').textContent=!cloudAvailable?'Cloud no configurado':cloudUser?'Cloud conectado':'Cloud disponible';
@@ -272,7 +273,7 @@
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});
     render();showView(['company','fleet','map','connect'].includes(location.hash.slice(1))?location.hash.slice(1):'company');
-    cloud.detect().then(async available=>{cloudResolved=true;cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();if(oauthFailed&&cloudAvailable){setAuthMode('login');showAuthError('No pudimos completar el acceso con Google. Inténtalo de nuevo.');}}).catch(()=>{cloudResolved=true;cloudAvailable=false;cloudOAuthProviders=[];renderCloud();});
+    cloud.detect().then(async available=>{cloudResolved=true;cloudAvailable=available;cloudOAuthProviders=available?await cloud.oauthProviders().catch(()=>[]):[];await refreshCloudSession();if(oauthFailed&&cloudAvailable){setAuthMode('login');showAuthError('No pudimos completar el acceso con Google. Inténtalo de nuevo.');}}).catch(()=>{cloudOAuthProviders=[];renderCloud();});
     window.LucidFenceApp={getState:()=>LucidFenceWeb.clone(state),runCycle,quickGoal};
     if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
