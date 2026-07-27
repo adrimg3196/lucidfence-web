@@ -92,6 +92,40 @@ test('cloud sync saves through the revision-checked RPC', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('cloud sync recomputes geofences server-side and rejects stale client claims', async () => {
+  const originalFetch = globalThis.fetch;
+  let rpc;
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/auth/v1/user')) return userResponse();
+    rpc = { url, options };
+    return new Response(JSON.stringify({ workspace_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', payload: {}, revision: 2 }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const { default: handler } = await import('../api/workspaces/state.js');
+    const res = response();
+    const now = new Date().toISOString();
+    const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await handler(req({ method: 'PUT', body: {
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expectedRevision: 1,
+      state: {
+        geofences: [{ id: 'hq', lat: 40.4168, lng: -3.7038, radiusM: 900 }],
+        devices: [
+          { id: 'fresh', lat: 40.4168, lng: -3.7038, observedAt: now, accuracyM: 10, fenceState: 'outside' },
+          { id: 'stale', lat: 40.5, lng: -3.8, observedAt: stale, accuracyM: 10, fenceState: 'outside' },
+          { id: 'imprecise', lat: 40.5, lng: -3.8, observedAt: now, accuracyM: 900, fenceState: 'outside' }
+        ]
+      }
+    } }), res);
+    assert.equal(res.statusCode, 200);
+    const saved = JSON.parse(rpc.options.body).new_payload.devices;
+    assert.deepEqual(saved.map(device => [device.id, device.fenceState, device.matchedFenceId]), [
+      ['fresh', 'inside', 'hq'], ['stale', 'unknown', null], ['imprecise', 'unknown', null]
+    ]);
+    assert.equal(saved[1].locationRejectionReason, 'stale');
+    assert.equal(saved[2].locationRejectionReason, 'inaccurate');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('cloud sync rejects secrets before any database write', async () => {
   const originalFetch = globalThis.fetch;
   let databaseWrites = 0;

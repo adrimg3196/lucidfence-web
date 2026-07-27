@@ -1,6 +1,7 @@
 import { allowMethod, assertSameOrigin, HttpError, readJson, sendError, sendJson } from '../_lib/http.js';
 import { requireUser } from '../_lib/session.js';
 import { safeWorkspaceState, workspaceId } from '../_lib/validation.js';
+import { evaluateWorkspaceGeofences } from '../_lib/geofence.js';
 
 function revision(value) {
   const parsed = Number(value);
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
       const body = readJson(req);
       targetId = workspaceId(body.workspaceId);
       expectedRevision = revision(body.expectedRevision);
-      cleanState = safeWorkspaceState(body.state);
+      cleanState = evaluateWorkspaceGeofences(safeWorkspaceState(body.state));
       if (!cleanState || Array.isArray(cleanState) || typeof cleanState !== 'object') {
         throw new HttpError(400, 'invalid_workspace_state', 'Workspace state must be an object');
       }
