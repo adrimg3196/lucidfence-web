@@ -12,13 +12,17 @@ Release descargable: **https://github.com/adrimg3196/lucidfence-web/releases**
 
 ## 2. SaaS central Vercel + Supabase
 
-El mismo frontend detecta automáticamente si existe `/api/runtime`:
+**https://lucidfence-web.vercel.app/**
+
+Crea una cuenta y una organización para usar el control plane Multi-UEM alojado. El mismo frontend detecta automáticamente si existe `/api/runtime`:
 
 - Sin backend: permanece local y offline.
 - Con Vercel/Supabase: ofrece Auth, workspaces y sincronización multi-dispositivo.
 - La sincronización es manual y usa control de revisión para evitar overwrites silenciosos.
 - Access y refresh tokens permanecen en cookies HttpOnly.
 - PostgreSQL RLS aísla cada workspace.
+
+El coste base puede ser **0 EUR mientras el uso permanezca dentro de las cuotas gratuitas**. No implica SLA ni capacidad ilimitada: Vercel Hobby es solo para uso personal/no comercial y Supabase Free puede pausar proyectos con poca actividad. Para explotación comercial, usa infraestructura BYOI o un plan de hosting que permita ese uso.
 
 [Desplegar frontend en Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fadrimg3196%2Flucidfence-web&env=SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY)
 
@@ -67,7 +71,7 @@ Todas las tablas tenant tienen RLS habilitado y forzado. Las funciones serverles
 
 El control plane solo autoejecuta simulaciones de bajo riesgo. No ejecuta `wipe`, `lock`, `factory_reset`, `delete` ni otras mutaciones destructivas.
 
-Para consultar una flota live que requiera una API key, el cliente debe desplegar el gateway read-only de `gateway/`. Los secretos UEM nunca deben introducirse en la PWA ni guardarse en Supabase como parte del workspace.
+Para consultar una flota live en el SaaS central, owner/admin configura una credencial de solo lectura desde **Conectar**; el BFF la verifica, cifra y guarda únicamente como sobre sellado en la tabla dedicada de conectores. La credencial en claro nunca vuelve al navegador ni forma parte del estado exportable del workspace. En la distribución BYOI estática, usa el gateway read-only de `gateway/`; ningún secreto se guarda en IndexedDB ni en el bundle.
 
 ## Autoalojar
 
