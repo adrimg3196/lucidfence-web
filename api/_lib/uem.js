@@ -222,6 +222,9 @@ export function normalizeGateway(raw, provider = 'custom-gateway') {
     locationSource: raw?.locationSource || 'unknown',
     locationAccuracy: raw?.locationAccuracy || 'unknown'
   });
+  device.accuracyM = Number(raw?.accuracyM ?? raw?.accuracy ?? raw?.horizontalAccuracy);
+  device.accuracyM = Number.isFinite(device.accuracyM) && device.accuracyM >= 0 ? device.accuracyM : null;
+  device.locationObservedAt = raw?.locationObservedAt || raw?.observedAt || raw?.lastSeen || raw?.last_seen_at || null;
   device.fenceState = ['inside', 'outside', 'unknown'].includes(raw?.fenceState) ? raw.fenceState : 'unknown';
   return device;
 }

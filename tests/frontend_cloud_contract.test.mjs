@@ -71,7 +71,14 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.match(source,/classList\.add\('connector-modal-open'\)/);
   assert.match(source,/classList\.remove\('connector-modal-open'\)/);
   assert.match(html,/body\.connector-modal-open\{overflow:hidden\}/);
-  assert.match(source,/event\.key==='Tab'/);
+  assert.match(html,/\.card-body\{[^}]*overflow-x:auto/);
+  assert.match(source,/function evidenceCoverage\(\).*:null;/);
+  assert.match(source,/evidenceCoverage\(\)===null\?'—'/);
+  assert.match(source,/getElementById\('fleetRows'\)/);
+  assert.match(source,/parentElement\.classList\.add\('card-body'\)/);
+  assert.match(html,/id="fleetRows"[\s\S]*<\/table>/);
+  assert.match(html,/class="card-body"[\s\S]*id="fleetRows"/);
+  assert.match(html,/table-scroll/);
   assert.match(source,/connectorOpener/);
   assert.match(source,/connectorOpenerProviderId/);
   assert.match(source,/opener\.focus\(\)/);
@@ -84,10 +91,14 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.doesNotMatch(html,/id="gatewayUrl"|id="saveGateway"|id="syncGateway"/);
 });
 
-test('SaaS sync preserves server-verified geofence results',async()=>{
+test('SaaS sync preserves server-verified geofence results and rejects stale tenant responses',async()=>{
   const source=await read('web-app.js');
   assert.match(source,/state\.devices\s*=\s*result\.devices/);
   assert.doesNotMatch(source,/state\.devices\s*=\s*LucidFenceWeb\.applyGeofences\(result\.devices/);
+  assert.match(source,/const targetWorkspace=activeWorkspaceId,syncSequence=\+\+uemRefreshSequence/);
+  assert.match(source,/syncSequence!==uemRefreshSequence\|\|targetWorkspace!==activeWorkspaceId\|\|!cloudUser/);
+  assert.match(source,/uemStatusMessage=.*providers.*status.*ok/s);
+  assert.match(source,/uemBindingHint.*uemStatusMessage/s);
 });
 
 test('service worker caches cloud client, bypasses API and deletes only LucidFence caches', async () => {

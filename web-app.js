@@ -14,7 +14,7 @@
     $('#crumb').textContent=({company:'Compañía',fleet:'Flota',map:'Geovallas',connect:'Conectar'})[id]||'Compañía';
     if(location.hash!=='#'+id) history.replaceState(null,'','#'+id);
   }
-  function evidenceCoverage(){const tasks=state.tasks||[];return tasks.length?Math.round(100*tasks.filter(t=>Array.isArray(t.evidence)&&t.evidence.length).length/tasks.length):100;}
+  function evidenceCoverage(){const tasks=state.tasks||[];return tasks.length?Math.round(100*tasks.filter(t=>Array.isArray(t.evidence)&&t.evidence.length).length/tasks.length):null;}
   function setAuthMode(mode){
     const signup=mode==='signup';
     $('#cloudLoginForm').classList.toggle('cloud-hidden',signup);
@@ -81,7 +81,8 @@
     const workspace=cloudWorkspaces.find(item=>item.id===activeWorkspaceId),canManage=['owner','admin'].includes(workspace?.role),canSync=['owner','admin','operator'].includes(workspace?.role);
     $('#syncAllUem').disabled=!canSync;
     if(!cloudUser||!activeWorkspaceId){grid.innerHTML='<div class="integration-empty">Inicia sesión y selecciona un workspace para gestionar integraciones.</div>';$('#uemBindingHint').textContent='Selecciona o crea un workspace cloud para empezar.';return;}
-    $('#uemBindingHint').textContent=`${workspace?.name||'Workspace'} · ${canManage?'Puedes configurar, rotar y sincronizar.':canSync?'Puedes sincronizar, pero no gestionar credenciales.':'Tu rol es de solo lectura; no puede sincronizar ni gestionar credenciales.'}`;
+    const binding=`${workspace?.name||'Workspace'} · ${canManage?'Puedes configurar, rotar y sincronizar.':canSync?'Puedes sincronizar, pero no gestionar credenciales.':'Tu rol es de solo lectura; no puede sincronizar ni gestionar credenciales.'}`;
+    $('#uemBindingHint').textContent=uemStatusMessage?`${binding} · ${uemStatusMessage}`:binding;
     grid.innerHTML=uemConnectors.map(item=>{const check=connectorChecks.get(item.id),checkText=check?.status==='busy'?'Comprobando acceso…':check?.status==='ok'?`${check.devices} dispositivos accesibles`:check?.status==='error'?check.message:'';return `<article class="integration-card"><div class="integration-card-head"><div class="integration-provider"><span class="integration-logo">${esc(item.name.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</span><div><h3>${esc(item.name)}</h3><p>${esc(connectorDescription(item.id))}</p></div></div><span class="integration-state ${item.configured?'ready':''}">${item.configured?'ACTIVO':'SIN CONFIGURAR'}</span></div><div class="integration-detail">${item.configured?esc(item.hint||'Identidad del proveedor guardada'):'Conecta y valida en una sola operación.'}${checkText?`<div class="integration-check ${esc(check.status)}">${esc(checkText)}</div>`:''}</div><div class="integration-card-actions"><small>${item.updatedAt?'Verificado '+esc(new Date(item.updatedAt).toLocaleDateString('es-ES')):'Credencial cifrada por workspace'}</small><div class="integration-action-group">${item.configured?`<button class="btn" type="button" data-test-connector="${esc(item.id)}" ${canSync&&check?.status!=='busy'?'':'disabled'}>${check?.status==='busy'?'Probando…':'Probar conexión'}</button>`:''}<button class="btn ${item.configured?'':'primary'}" type="button" data-connector="${esc(item.id)}" ${canManage?'':'disabled'}>${item.configured?'Gestionar':'Conectar'}</button></div></div></article>`;}).join('')||'<div class="integration-empty">No se pudo cargar el catálogo de conectores.</div>';
     const configured=uemConnectors.filter(item=>item.configured).length,snap=LucidFenceWeb.snapshot(state);
     $('#uemSummary').textContent=`${configured} conectores · ${snap.devices} dispositivos`;
@@ -189,8 +190,8 @@
     $('#cycleValue').textContent=state.cycle||0;
     $('#goalsValue').textContent=(state.goals||[]).filter(g=>g.status==='active').length;
     $('#outsideValue').textContent=snap.outside;
-    $('#complianceValue').textContent=snap.compliance+'%';
-    $('#evidenceValue').textContent=evidenceCoverage()+'%';
+    $('#complianceValue').textContent=snap.compliance===null?'—':snap.compliance+'%';
+    $('#evidenceValue').textContent=evidenceCoverage()===null?'—':evidenceCoverage()+'%';
     if($('#providersValue'))$('#providersValue').textContent=snap.providers?String(snap.providers):'DEMO';
     $('#pauseBtn').textContent=state.paused?'Reanudar compañía':'Pausar compañía';
     $('#runCycle').disabled=state.paused||!(state.goals||[]).some(g=>g.status==='active');
@@ -198,6 +199,7 @@
     $('#goals').innerHTML=(state.goals||[]).length?(state.goals||[]).slice().reverse().map(g=>`<article class="row"><div><strong>${esc(g.title)}</strong><p>${esc(g.outcome)}<br>${esc(g.metric.name)}: ${g.metric.current===null?'—':esc(g.metric.current)} → ${esc(g.metric.target)}</p></div><span class="tag">${esc(g.status.toUpperCase())}</span></article>`).join(''):'<div class="empty">Crea el primer objetivo medible. Ningún ciclo comienza sin una meta.</div>';
     $('#tasks').innerHTML=(state.tasks||[]).length?(state.tasks||[]).slice(-10).reverse().map(t=>`<article class="row"><div><strong>${esc(t.action)}</strong><p>${esc(t.title)} · ${esc(t.agent)}<br>${esc(t.evidence?.[0]?.source||'evidence')} = ${esc(t.evidence?.[0]?.value??'—')}</p></div><span class="tag ${t.risk==='medium'?'medium':''}">${esc(t.risk.toUpperCase())} · ${esc(t.status.toUpperCase())}</span></article>`).join(''):'<div class="empty">La cola está vacía. Ejecuta un ciclo seguro para producir evidencia.</div>';
     $('#fleetRows').innerHTML=(state.devices||[]).map(d=>`<tr><td><strong>${esc(d.name)}</strong><br><span style="color:var(--muted)">${esc(d.id)}</span></td><td>${esc((d.providerSources||[d.provider||'local']).join(' + '))}</td><td>${esc(d.platform)}</td><td class="state ${esc(d.fenceState)}">${esc(d.fenceState)}</td><td>${esc(d.risk)}</td><td>${d.compliant===null||d.compliant===undefined?'Desconocido':d.compliant?'Cumple':'No cumple'}</td></tr>`).join('');
+    const table=document.getElementById('fleetRows');if(table&&table.parentElement)table.parentElement.classList.add('card-body');
     renderConnectorCenter();
     const map=$('#map');map.querySelectorAll('.point').forEach(node=>node.remove());
     (state.devices||[]).filter(d=>d.lat!==null&&d.lng!==null).forEach((d,index)=>{const point=document.createElement('button');point.className='point '+(d.fenceState==='outside'?'out':'');point.style.left=(23+(index*13)%62)+'%';point.style.top=(22+(index*17)%59)+'%';point.title=d.name+' · '+d.fenceState;point.setAttribute('aria-label',point.title);map.appendChild(point);});
@@ -259,16 +261,20 @@
     $('#connectorModal').addEventListener('click',event=>{if(event.target.id==='connectorModal')closeConnectorModal();});
     addEventListener('keydown',event=>{const modal=$('#connectorModal');if(modal.classList.contains('cloud-hidden'))return;if(event.key==='Escape'){closeConnectorModal();return;}if(event.key==='Tab'){const focusable=$$('.connector-dialog button:not([disabled]),.connector-dialog input:not([disabled])').filter(node=>node.offsetParent!==null);if(!focusable.length)return;const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
     $('#syncAllUem').addEventListener('click',async()=>{
+      const targetWorkspace=activeWorkspaceId,syncSequence=++uemRefreshSequence;
       try{
         if(!cloudAvailable||!cloudUser)throw new Error('Inicia sesión cloud para sincronizar proveedores');
-        if(!activeWorkspaceId)throw new Error('Selecciona un workspace');
-        const workspace=cloudWorkspaces.find(item=>item.id===activeWorkspaceId);if(!['owner','admin','operator'].includes(workspace?.role))throw new Error('Tu rol no permite sincronizar proveedores');
-        const result=await uem.sync('all',activeWorkspaceId);
+        if(!targetWorkspace)throw new Error('Selecciona un workspace');
+        const workspace=cloudWorkspaces.find(item=>item.id===targetWorkspace);if(!['owner','admin','operator'].includes(workspace?.role))throw new Error('Tu rol no permite sincronizar proveedores');
+        const result=await uem.sync('all',targetWorkspace);
+        if(syncSequence!==uemRefreshSequence||targetWorkspace!==activeWorkspaceId||!cloudUser)return;
         uemProviders=uemProviders.map(item=>{const live=result.providers.find(status=>status.provider===item.id);return live?{...item,lastStatus:live.status,lastCount:live.count}:item;});
+        const failed=result.providers.filter(status=>status.status!=='ok');
+        uemStatusMessage=failed.length?`Cobertura parcial: ${failed.map(status=>status.provider).join(', ')} no respondió`:'';
         if(!result.devices.length)throw new Error('No hay proveedores configurados o no devolvieron dispositivos');
         state.devices=result.devices;state.settings={...state.settings,mode:'multi_uem',uemReadOnly:true,lastSync:new Date().toISOString()};
         await persist();toast(result.devices.length+' dispositivos unificados desde '+result.providers.filter(p=>p.status==='ok').length+' proveedores');showView('fleet');
-      }catch(error){toast('Multi-UEM: '+error.message);}
+      }catch(error){if(syncSequence!==uemRefreshSequence||targetWorkspace!==activeWorkspaceId||!cloudUser)return;uemStatusMessage='Última sincronización fallida: '+error.message;renderConnectorCenter();toast('Multi-UEM: '+error.message);}
     });
     $$('[data-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.view)));$$('[data-view-link]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewLink)));
     addEventListener('hashchange',()=>{const id=location.hash.slice(1);if(['company','fleet','map','connect'].includes(id))showView(id);});

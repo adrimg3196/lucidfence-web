@@ -116,11 +116,13 @@
     if(Number(snapshot.outside)>0) created.push(task(goal,'geo-policy','Simular ajuste de geovalla','simulate_geofence','low',evidence('uem.outside',Number(snapshot.outside)),goal.autonomy));
     if(Number(snapshot.unknown)>0) created.push(task(goal,'field-intelligence','Analizar calidad de ubicación','analyze_location_quality','low',evidence('uem.unknown',Number(snapshot.unknown)),goal.autonomy));
     if(Number(snapshot.critical)>0) created.push(task(goal,'risk-compliance','Recomendar respuesta para CVE críticas','recommend_soar_playbook','medium',evidence('cve.critical',Number(snapshot.critical)),goal.autonomy));
-    if(Number(snapshot.compliance)<90) created.push(task(goal,'risk-compliance','Evaluar brecha de compliance','assess_compliance','low',evidence('compliance.percent',Number(snapshot.compliance)),goal.autonomy));
+    const complianceValue=Number(snapshot.compliance);
+    if(snapshot.compliance!==null&&snapshot.compliance!==undefined&&Number.isFinite(complianceValue)&&complianceValue<90) created.push(task(goal,'risk-compliance','Evaluar brecha de compliance','assess_compliance','low',evidence('compliance.percent',complianceValue),goal.autonomy));
     if(!created.length) created.push(task(goal,'product-value','Optimizar rutas sin cambios remotos','optimize_routes','low',evidence('uem.devices',Number(snapshot.devices)||0),goal.autonomy));
-    const currentByMetric={outside_devices:Number(snapshot.outside)||0,unknown_devices:Number(snapshot.unknown)||0,critical_devices:Number(snapshot.critical)||0,compliance_percent:Number(snapshot.compliance)||0};
+    const currentByMetric={outside_devices:Number(snapshot.outside)||0,unknown_devices:Number(snapshot.unknown)||0,critical_devices:Number(snapshot.critical)||0,compliance_percent:snapshot.compliance===null||snapshot.compliance===undefined?null:complianceValue};
     goal.metric.current=currentByMetric[goal.metric.name]??0; goal.metric.measuredAt=now();
-    const achieved=goal.metric.direction==='min'?goal.metric.current>=goal.metric.target:goal.metric.current<=goal.metric.target;
+    if(goal.metric.name==='compliance_percent'&&currentByMetric.compliance_percent===null)goal.metric.current=null;
+    const achieved=goal.metric.current!==null&&(goal.metric.direction==='min'?goal.metric.current>=goal.metric.target:goal.metric.current<=goal.metric.target);
     if(achieved){goal.status='achieved';goal.achievedAt=now();}
     state.tasks.push(...created); state.tasks=state.tasks.slice(-300);
     state.decisions.push({id:id('decision'),cycle:state.cycle,goalId:goal.id,squad:[...new Set(['mission-control','qa-sre',...created.map(t=>t.agent)])],tasks:created.map(t=>t.id),at:now()});
@@ -130,7 +132,7 @@
   function snapshot(state){
     const devices=state.devices||[], known=devices.filter(d=>typeof d.compliant==='boolean');
     const providers=[...new Set(devices.flatMap(d=>Array.isArray(d.providerSources)?d.providerSources:[d.provider]).filter(Boolean))];
-    return {devices:devices.length,outside:devices.filter(d=>d.fenceState==='outside').length,unknown:devices.filter(d=>d.fenceState==='unknown').length,critical:devices.filter(d=>d.risk==='critical').length,highRisk:devices.filter(d=>['high','critical'].includes(d.risk)).length,compliance:known.length?Math.round(100*known.filter(d=>d.compliant).length/known.length):100,providers:providers.length,providerIds:providers};
+    return {devices:devices.length,outside:devices.filter(d=>d.fenceState==='outside').length,unknown:devices.filter(d=>d.fenceState==='unknown').length,critical:devices.filter(d=>d.risk==='critical').length,highRisk:devices.filter(d=>['high','critical'].includes(d.risk)).length,compliance:known.length?Math.round(100*known.filter(d=>d.compliant).length/known.length):null,providers:providers.length,providerIds:providers};
   }
   return {AGENTS,GOAL_TEMPLATES,initialState,sanitizeImport,applyGeofences,createGoal,createRecommendedGoal,recommendedTemplate,runCycle,snapshot,clone};
 });

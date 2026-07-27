@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       if (devices > 1000 || geofences > 250 || devices * geofences > 50_000) {
         throw new HttpError(400, 'geofence_work_limit_exceeded', 'Workspace geofence evaluation exceeds safe limits');
       }
-      cleanState = evaluateWorkspaceGeofences(safeWorkspaceState(body.state));
+      cleanState = evaluateWorkspaceGeofences(safeWorkspaceState(body.state), { trustedSource: true });
       if (!cleanState || Array.isArray(cleanState) || typeof cleanState !== 'object') {
         throw new HttpError(400, 'invalid_workspace_state', 'Workspace state must be an object');
       }

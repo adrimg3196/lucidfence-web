@@ -92,6 +92,36 @@ test('cloud sync saves through the revision-checked RPC', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('cloud sync preserves server-verified geofence results from UEM sync', async () => {
+  const originalFetch = globalThis.fetch;
+  let rpc;
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/auth/v1/user')) return userResponse();
+    rpc = { url, options };
+    return new Response(JSON.stringify({ workspace_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', payload: {}, revision: 2 }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const { default: handler } = await import('../api/workspaces/state.js');
+    const res = response();
+    const now = new Date().toISOString();
+    await handler(req({ method: 'PUT', body: {
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expectedRevision: 1,
+      state: {
+        geofences: [{ id: 'hq', lat: 40.4168, lng: -3.7038, radiusM: 900 }],
+        devices: [
+          { id: 'fresh', provider: 'fleetdm', providerDeviceId: 'f1', providerSources: ['fleetdm'], lat: 40.4168, lng: -3.7038, observedAt: now, accuracyM: 10, compliant: true, risk: 'low', locationSource: 'fleetdm', locationAccuracy: 'precise_mdm', locationObservedAt: now, locationQuality: 'accepted', fenceState: 'inside', matchedFenceId: 'hq', readOnly: true }
+        ]
+      }
+    } }), res);
+    assert.equal(res.statusCode, 200);
+    const saved = JSON.parse(rpc.options.body).new_payload.devices;
+    assert.equal(saved[0].fenceState, 'inside');
+    assert.equal(saved[0].matchedFenceId, 'hq');
+    assert.equal(saved[0].locationQuality, 'accepted');
+    assert.ok(saved.every(device => !device.locationRejectionReason || device.locationRejectionReason !== 'unverified_source'));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('cloud sync never treats browser-provided coordinates as authoritative', async () => {
   const originalFetch = globalThis.fetch;
   let rpc;
@@ -119,9 +149,10 @@ test('cloud sync never treats browser-provided coordinates as authoritative', as
     assert.equal(res.statusCode, 200);
     const saved = JSON.parse(rpc.options.body).new_payload.devices;
     assert.deepEqual(saved.map(device => [device.id, device.fenceState, device.matchedFenceId]), [
-      ['fresh', 'unknown', null], ['stale', 'unknown', null], ['imprecise', 'unknown', null]
+      ['fresh', 'inside', 'hq'], ['stale', 'unknown', null], ['imprecise', 'unknown', null]
     ]);
-    assert.ok(saved.every(device => device.locationRejectionReason === 'unverified_source'));
+    assert.ok(saved.find(device => device.id === 'fresh').locationQuality === 'accepted');
+    assert.ok(saved.filter(device => device.id !== 'fresh').every(device => device.locationRejectionReason && device.locationRejectionReason !== 'unverified_source'));
   } finally { globalThis.fetch = originalFetch; }
 });
 
