@@ -266,7 +266,7 @@
         const result=await uem.sync('all',activeWorkspaceId);
         uemProviders=uemProviders.map(item=>{const live=result.providers.find(status=>status.provider===item.id);return live?{...item,lastStatus:live.status,lastCount:live.count}:item;});
         if(!result.devices.length)throw new Error('No hay proveedores configurados o no devolvieron dispositivos');
-        state.devices=LucidFenceWeb.applyGeofences(result.devices,state.geofences);state.settings={...state.settings,mode:'multi_uem',uemReadOnly:true,lastSync:new Date().toISOString()};
+        state.devices=result.devices;state.settings={...state.settings,mode:'multi_uem',uemReadOnly:true,lastSync:new Date().toISOString()};
         await persist();toast(result.devices.length+' dispositivos unificados desde '+result.providers.filter(p=>p.status==='ok').length+' proveedores');showView('fleet');
       }catch(error){toast('Multi-UEM: '+error.message);}
     });

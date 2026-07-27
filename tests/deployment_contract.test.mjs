@@ -55,6 +55,8 @@ test('Docker BYOI serves an explicit static allowlist only', async () => {
   assert.doesNotMatch(dockerfile, /COPY[^\n]*\s\.\s+\/usr\/share\/nginx\/html/);
   for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'web-uem.js', 'web-fleet.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
   for (const privatePath of ['.git', '.env', 'api', 'tests', '.github']) assert.ok(ignore.includes(privatePath));
+  const copied = dockerfile.match(/^COPY(?:\s+--\S+)?\s+(.+)\s+\/usr\/share\/nginx\/html\/$/m)?.[1].split(/\s+/) ?? [];
+  for (const file of copied) assert.match(ignore,new RegExp(`^!${file.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}$`,'m'),`${file} missing from Docker context`);
 });
 
 test('Pages executes the full gate before uploading production', async () => {

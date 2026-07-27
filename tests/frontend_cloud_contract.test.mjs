@@ -84,6 +84,12 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.doesNotMatch(html,/id="gatewayUrl"|id="saveGateway"|id="syncGateway"/);
 });
 
+test('SaaS sync preserves server-verified geofence results',async()=>{
+  const source=await read('web-app.js');
+  assert.match(source,/state\.devices\s*=\s*result\.devices/);
+  assert.doesNotMatch(source,/state\.devices\s*=\s*LucidFenceWeb\.applyGeofences\(result\.devices/);
+});
+
 test('service worker caches cloud client, bypasses API and deletes only LucidFence caches', async () => {
   const source = await read('sw.js');
   assert.ok(source.includes("'./web-cloud.js'"));

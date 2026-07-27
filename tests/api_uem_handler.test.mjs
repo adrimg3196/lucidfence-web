@@ -36,13 +36,15 @@ test('managed synchronization sends server proof only to the sealed-config RPC',
     calls.push({url:String(url),body:String(options.body||'')});
     if(String(url).endsWith('/auth/v1/user'))return authUser();
     if(String(url).includes('workspace_members'))return membership('operator');
+    if(String(url).includes('workspace_state'))return new Response(JSON.stringify([{payload:{geofences:[{id:'hq',lat:40.4168,lng:-3.7038,radiusM:900}]}}]),{status:200,headers:{'content-type':'application/json'}});
     if(String(url).includes('load_workspace_uem_connector'))return new Response(JSON.stringify([{provider:'fleetdm',sealed_config:sealed}]),{status:200,headers:{'content-type':'application/json'}});
-    return new Response(JSON.stringify({hosts:[],meta:{has_next_results:false}}),{status:200,headers:{'content-type':'application/json'}});
+    return new Response(JSON.stringify({hosts:[{id:7,uuid:'host-7',hostname:'Campo',platform:'linux',geolocation:{geometry:{coordinates:[40.4168,-3.7038]}}}],meta:{has_next_results:false}}),{status:200,headers:{'content-type':'application/json'}});
   };
   try{
     const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req('GET',{provider:'fleetdm',workspaceId:WORKSPACE}),response);
-    assert.equal(response.statusCode,200);const rpc=JSON.parse(calls.find(call=>call.url.includes('load_workspace_uem_connector')).body);
+    assert.equal(response.statusCode,200);const payload=JSON.parse(response.body),rpc=JSON.parse(calls.find(call=>call.url.includes('load_workspace_uem_connector')).body);
     assert.match(rpc.connector_server_proof,/^[A-Za-z0-9_-]{43}$/);assert.doesNotMatch(response.body,/server_proof|sealed_config|managed-token/);
+    assert.equal(payload.devices[0].fenceState,'unknown');assert.equal(payload.devices[0].locationRejectionReason,'invalid_accuracy');
   }finally{globalThis.fetch=original;}
 });
 

@@ -5,6 +5,7 @@ import {
   connectorCatalog, connectorConfigToEnv, connectorHint, connectorProvider, connectorRowsToEnv, connectorRpcProof, sealConnectorConfig, validateConnectorConfig
 } from '../_lib/connectors.js';
 import { providerRegistry, syncAllProviders, syncProvider, UemProviderError } from '../_lib/uem.js';
+import { evaluateWorkspaceGeofences } from '../_lib/geofence.js';
 
 const TIMEOUT_MS = 8000;
 const SYNC_ROLES = new Set(['owner', 'admin', 'operator']);
@@ -15,6 +16,17 @@ function allowedWorkspaces(env = process.env) {
 }
 
 function rows(payload) { return Array.isArray(payload) ? payload : (payload ? [payload] : []); }
+
+async function workspaceGeofences(client, accessToken, targetWorkspace) {
+  const query = `?select=payload&workspace_id=eq.${encodeURIComponent(targetWorkspace)}&limit=1`;
+  const { payload } = await client.json(`/rest/v1/workspace_state${query}`, { accessToken });
+  const state = rows(payload)[0]?.payload;
+  return Array.isArray(state?.geofences) ? state.geofences : [];
+}
+
+function evaluateDevices(devices, geofences) {
+  return evaluateWorkspaceGeofences({ devices, geofences }, { trustedSource: true }).devices;
+}
 
 async function managedStatus(client, accessToken, targetWorkspace) {
   const { payload } = await client.json('/rest/v1/rpc/list_workspace_uem_connectors', {
@@ -128,19 +140,21 @@ export default async function handler(req, res) {
     const managedEnv = connectorRowsToEnv(envelopes, targetWorkspace);
     const effectiveEnv = legacyAllowed ? { ...process.env, ...managedEnv } : managedEnv;
     const registry = providerRegistry(effectiveEnv);
+    const geofences = await workspaceGeofences(client, accessToken, targetWorkspace);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       if (requested === 'all') {
         const result = await syncAllProviders(effectiveEnv, controller.signal);
-        sendJson(res, 200, { source: 'multi-uem', readOnly: true, count: result.devices.length, ...result });
+        const devices = evaluateDevices(result.devices, geofences);
+        sendJson(res, 200, { source: 'multi-uem', readOnly: true, ...result, count: devices.length, devices, geofenceVerified: true });
         return;
       }
       const provider = registry.find(item => item.id === requested);
       if (!provider) throw new HttpError(404, 'provider_not_found', 'UEM provider was not found');
       if (!provider.configured) throw new HttpError(503, 'provider_not_configured', 'UEM provider is not configured');
-      const devices = await syncProvider(provider.id, effectiveEnv, controller.signal);
-      sendJson(res, 200, { source: provider.id, readOnly: true, count: devices.length, providers: [{ provider: provider.id, status: 'ok', count: devices.length }], devices });
+      const devices = evaluateDevices(await syncProvider(provider.id, effectiveEnv, controller.signal), geofences);
+      sendJson(res, 200, { source: provider.id, readOnly: true, count: devices.length, providers: [{ provider: provider.id, status: 'ok', count: devices.length }], devices, geofenceVerified: true });
     } finally { clearTimeout(timer); }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') sendError(res, new HttpError(504, 'uem_timeout', 'UEM synchronization timed out'));
