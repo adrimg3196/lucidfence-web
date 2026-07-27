@@ -23,6 +23,7 @@ test('PWA exposes a dedicated SaaS auth shell without making cloud mandatory', a
   const css=html.match(/<style>([\s\S]*?)<\/style>/)?.[1]||'';
   assert.equal((css.match(/\{/g)||[]).length,(css.match(/\}/g)||[]).length);
   for(const rule of ['.cloud-boot{position:fixed','.cloud-boot-mark svg{width:23px','.auth-sso svg{width:17px','.cloud-auth-gate{position:fixed'])assert.ok(css.includes(rule),`missing CSS rule ${rule}`);
+  assert.ok(css.includes('body.cloud-auth-open .shell{display:none}'),'authenticated shell must not render behind the auth gate');
 });
 
 test('frontend binds auth and prevents cross-workspace push without pull', async () => {
