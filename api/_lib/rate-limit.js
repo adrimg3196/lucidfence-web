@@ -1,56 +1,84 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
+import { isIP } from 'node:net';
+import { connectorRpcProof } from './connectors.js';
+import { createSupabaseClient, readConfig } from './supabase.js';
 
 const WINDOW_MS = 5 * 60 * 1000;
 const MAX_FAILURES = 5;
 const MAX_KEYS = 4096;
-const attempts = new Map();
+const localAttempts = new Map();
 
-function trustedClientAddress(req) {
-  const vercel = String(req?.headers?.['x-vercel-forwarded-for'] || '').split(',')[0].trim();
-  if (vercel) return vercel.slice(0, 128);
-  return String(req?.socket?.remoteAddress || 'unknown').slice(0, 128);
-}
-
-function keyFor(req, email) {
-  const identity = String(email || '').trim().toLowerCase();
-  return createHash('sha256').update(`${trustedClientAddress(req)}\0${identity}`, 'utf8').digest('hex');
-}
-
-function purge(now) {
-  for (const [key, state] of attempts) {
-    if (state.windowStartedAt + WINDOW_MS <= now) attempts.delete(key);
+function trustedClientAddress(req, env = process.env) {
+  if (env.VERCEL === '1') {
+    const value = String(req?.headers?.['x-vercel-forwarded-for'] || '').split(',')[0].trim();
+    return isIP(value) ? value : 'invalid-vercel-client';
   }
-  while (attempts.size > MAX_KEYS) attempts.delete(attempts.keys().next().value);
+  const value = String(req?.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  return isIP(value) ? value : 'unknown-local-client';
 }
 
-export function checkLoginRateLimit(req, email, now = Date.now()) {
-  purge(now);
-  const key = keyFor(req, email);
-  const state = attempts.get(key);
-  if (!state || state.failures < MAX_FAILURES) return { allowed: true, key };
-  return {
-    allowed: false,
-    key,
-    retryAfter: Math.max(1, Math.ceil((state.windowStartedAt + WINDOW_MS - now) / 1000))
-  };
+export function loginBucketKey(req, email, env = process.env) {
+  const identity = String(email || '').trim().toLowerCase();
+  const address = trustedClientAddress(req, env);
+  const secret = String(env.UEM_CONNECTOR_RPC_SECRET || '').trim();
+  if (env.VERCEL === '1' && !secret) throw new Error('UEM_CONNECTOR_RPC_SECRET is required');
+  return secret
+    ? createHmac('sha256', secret).update(`lucidfence:login-rate:v1:${address}\0${identity}`, 'utf8').digest('hex')
+    : createHash('sha256').update(`${address}\0${identity}`, 'utf8').digest('hex');
 }
 
-export function recordLoginFailure(req, email, now = Date.now()) {
-  purge(now);
-  const key = keyFor(req, email);
-  const current = attempts.get(key);
-  const state = current && current.windowStartedAt + WINDOW_MS > now
-    ? { windowStartedAt: current.windowStartedAt, failures: current.failures + 1 }
-    : { windowStartedAt: now, failures: 1 };
-  attempts.delete(key);
-  attempts.set(key, state);
-  while (attempts.size > MAX_KEYS) attempts.delete(attempts.keys().next().value);
-  return state.failures;
+function purgeLocal(now) {
+  for (const [key, state] of localAttempts) {
+    if (state.windowStartedAt + WINDOW_MS <= now) localAttempts.delete(key);
+  }
 }
 
-export function clearLoginFailures(req, email) {
-  attempts.delete(keyFor(req, email));
+function reserveLocal(bucketKey, now = Date.now()) {
+  purgeLocal(now);
+  const current = localAttempts.get(bucketKey);
+  if (!current) {
+    if (localAttempts.size >= MAX_KEYS) return { allowed: false, retryAfter: 300, bucketKey };
+    localAttempts.set(bucketKey, { windowStartedAt: now, failures: 1 });
+    return { allowed: true, retryAfter: 0, bucketKey };
+  }
+  if (current.failures >= MAX_FAILURES) {
+    return { allowed: false, retryAfter: Math.max(1, Math.ceil((current.windowStartedAt + WINDOW_MS - now) / 1000)), bucketKey };
+  }
+  current.failures += 1;
+  return { allowed: true, retryAfter: 0, bucketKey };
 }
 
-export function resetLoginRateLimitForTests() { attempts.clear(); }
-export function loginRateLimitDebugKeys() { return [...attempts.keys()]; }
+function finishLocal(bucketKey, outcome) {
+  const current = localAttempts.get(bucketKey);
+  if (!current) return;
+  if (outcome === 'success') localAttempts.delete(bucketKey);
+  else if (current.failures <= 1) localAttempts.delete(bucketKey);
+  else current.failures -= 1;
+}
+
+function rpcClient(env = process.env, fetchImpl = fetch) {
+  return createSupabaseClient(readConfig(env), fetchImpl);
+}
+
+export async function reserveLoginAttempt(req, email, env = process.env, fetchImpl = fetch) {
+  const bucketKey = loginBucketKey(req, email, env);
+  if (env.VERCEL !== '1') return reserveLocal(bucketKey);
+  const { payload } = await rpcClient(env, fetchImpl).json('/rest/v1/rpc/reserve_login_attempt', {
+    method: 'POST',
+    body: { target_bucket_key: bucketKey, connector_server_proof: connectorRpcProof(env) }
+  });
+  const result = Array.isArray(payload) ? payload[0] : payload;
+  return { allowed: result?.allowed === true, retryAfter: Math.max(0, Number(result?.retry_after) || 0), bucketKey };
+}
+
+export async function finishLoginAttempt(bucketKey, outcome, env = process.env, fetchImpl = fetch) {
+  if (!['success', 'provider_error'].includes(outcome)) throw new Error('invalid login attempt outcome');
+  if (env.VERCEL !== '1') { finishLocal(bucketKey, outcome); return; }
+  await rpcClient(env, fetchImpl).json('/rest/v1/rpc/finish_login_attempt', {
+    method: 'POST',
+    body: { target_bucket_key: bucketKey, outcome, connector_server_proof: connectorRpcProof(env) }
+  });
+}
+
+export function resetLoginRateLimitForTests() { localAttempts.clear(); }
+export function loginRateLimitDebugKeys() { return [...localAttempts.keys()]; }

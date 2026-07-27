@@ -6,6 +6,7 @@ const migrationUrl = new URL('../supabase/migrations/202607210001_initial.sql', 
 const conflictMigrationUrl = new URL('../supabase/migrations/202607220001_revision_conflict_status.sql', import.meta.url);
 const functionAclMigrationUrl = new URL('../supabase/migrations/202607270001_lock_down_function_acl.sql', import.meta.url);
 const internalFunctionAclMigrationUrl = new URL('../supabase/migrations/202607270002_lock_down_internal_function_acl.sql', import.meta.url);
+const loginRateLimitMigrationUrl = new URL('../supabase/migrations/202607270003_durable_login_rate_limit.sql', import.meta.url);
 
 async function migration() {
   return readFile(migrationUrl, 'utf8');
@@ -96,4 +97,16 @@ test('internal function ACL migration revokes authenticated execution explicitly
   const sql = (await readFile(internalFunctionAclMigrationUrl, 'utf8')).toLowerCase();
   assert.ok(sql.includes('revoke execute on function public.verify_uem_connector_server_proof(text) from authenticated'));
   assert.ok(sql.includes('revoke execute on function public.rls_auto_enable() from authenticated'));
+});
+
+test('durable login throttle is atomic bounded and inaccessible as a table', async () => {
+  const sql = (await readFile(loginRateLimitMigrationUrl, 'utf8')).toLowerCase();
+  assert.ok(sql.includes('create table public.login_rate_limits'));
+  assert.ok(sql.includes('pg_advisory_xact_lock'));
+  assert.ok(sql.includes('>= 4096'));
+  assert.ok(sql.includes("interval '5 minutes'"));
+  assert.ok(sql.includes('revoke all on public.login_rate_limits from public, anon, authenticated'));
+  assert.ok(sql.includes('grant execute on function public.reserve_login_attempt(text, text) to anon'));
+  assert.ok(sql.includes('grant execute on function public.finish_login_attempt(text, text, text) to anon'));
+  assert.ok(sql.includes("outcome not in ('success', 'provider_error')"));
 });
