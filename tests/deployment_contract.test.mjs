@@ -64,6 +64,20 @@ test('Pages executes the full gate before uploading production', async () => {
   assert.ok(workflow.indexOf('npm run check') < workflow.indexOf('actions/upload-pages-artifact'));
 });
 
+test('Pages artifact includes every local script loaded by the public entrypoint', async () => {
+  const [entrypoint, workflow] = await Promise.all([
+    read('index.html'),
+    read('.github/workflows/pages.yml'),
+  ]);
+  const localScripts = [...entrypoint.matchAll(/<script\s+[^>]*src=["'](?:\.\/)?([^:"']+)["']/g)]
+    .map(match => match[1]);
+  const prepareSite = workflow.match(/- name: Prepare static site([\s\S]*?)(?=\n\s*- uses:)/)?.[1] ?? '';
+
+  assert.ok(localScripts.length > 0);
+  const missingScripts = localScripts.filter(script => !prepareSite.includes(script));
+  assert.deepEqual(missingScripts, []);
+});
+
 test('Supabase guide uses a pinned local CLI through npx', async () => {
   const guide = await read('DEPLOY_CLOUD.md');
   assert.match(guide, /npm install --save-dev supabase@/);
