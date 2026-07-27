@@ -58,6 +58,33 @@ test('login exchanges credentials server-side and returns only HttpOnly cookies'
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('login applies bounded application-owned throttling without storing raw email', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: 'invalid' }), { status: 400, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const { resetLoginRateLimitForTests, loginRateLimitDebugKeys } = await import('../api/_lib/rate-limit.js');
+    resetLoginRateLimitForTests();
+    const { default: handler } = await import('../api/auth/login.js');
+    let last;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      last = response();
+      const request = req({ email: 'target@example.com', password: 'wrong-password' });
+      request.headers['x-vercel-forwarded-for'] = '203.0.113.90';
+      await handler(request, last);
+    }
+    assert.equal(last.statusCode, 429);
+    assert.equal(json(last).error, 'login_rate_limited');
+    assert.equal(calls, 5);
+    assert.ok(last.headers.get('retry-after'));
+    assert.ok(loginRateLimitDebugKeys().every(key => !key.includes('target@example.com')));
+    assert.ok(loginRateLimitDebugKeys().length <= 4096);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('login rejects cross-origin requests before contacting Supabase', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
