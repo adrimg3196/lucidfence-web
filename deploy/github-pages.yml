@@ -18,8 +18,13 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare explicit static artifact
+        run: |
+          rm -rf _site && mkdir _site
+          cp index.html web.html web-core.js web-store.js web-cloud.js web-uem.js web-fleet.js web-app.js \
+            web-worker.js sw.js runtime.json manifest.webmanifest lucidfence-icon.svg .nojekyll _site/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - id: deploy
         uses: actions/deploy-pages@v4

@@ -108,10 +108,12 @@ function platform(value) {
 function point(raw, source = 'unknown', accuracy = 'unknown') {
   const lat = Number(raw?.latitude ?? raw?.lat);
   const lng = Number(raw?.longitude ?? raw?.lng ?? raw?.lon);
+  const measuredAccuracy = Number(raw?.accuracyM ?? raw?.accuracy ?? raw?.horizontalAccuracy ?? raw?.horizontal_accuracy);
+  const accuracyM = Number.isFinite(measuredAccuracy) && measuredAccuracy >= 0 ? measuredAccuracy : null;
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return { lat: null, lng: null, locationSource: 'unknown', locationAccuracy: 'unknown' };
+    return { lat: null, lng: null, accuracyM: null, locationSource: 'unknown', locationAccuracy: 'unknown' };
   }
-  return { lat, lng, locationSource: source, locationAccuracy: accuracy };
+  return { lat, lng, accuracyM, locationSource: source, locationAccuracy: accuracy };
 }
 
 function identity(value) {
@@ -241,8 +243,10 @@ function mergePair(current, device) {
     ...current,
     lat: location.lat,
     lng: location.lng,
+    accuracyM: location.accuracyM,
     locationSource: location.locationSource,
     locationAccuracy: location.locationAccuracy,
+    locationObservedAt: location.locationObservedAt,
     compliant: current.compliant === false || device.compliant === false ? false : (current.compliant === true || device.compliant === true ? true : null),
     risk: (RISK_RANK[device.risk] || 0) > (RISK_RANK[current.risk] || 0) ? device.risk : current.risk,
     serialNumber: current.serialNumber || device.serialNumber,

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mergeDevices, normalizeApplivery, normalizeIntune, normalizeJamf,
+  mergeDevices, normalizeApplivery, normalizeGateway, normalizeIntune, normalizeJamf,
   providerRegistry, syncAllProviders, syncProvider, validateProviderUrl, assertPublicResolution, pinnedDispatcher
 } from '../api/_lib/uem.js';
+import { evaluateWorkspaceGeofences } from '../api/_lib/geofence.js';
 
 const PUBLIC_DNS=async()=>[{address:'93.184.216.34',family:4}];
 
@@ -19,7 +20,7 @@ test('provider normalizers produce the common read-only device shape', () => {
   const applivery = normalizeApplivery({
     id:'a1',type:'ios',state:'ACTIVE',displayName:'iPhone Campo',lastStatusReportTime:'2026-07-09T12:00:00Z',
     summary:{name:'iPhone Campo',os:'iOS 18',serialNumber:'SER-1',compliance:{isCompliance:false}},
-    lastLocation:{agent:{latitude:40.4,longitude:-3.7,date:'2026-07-09T11:59:00Z',address:{city:'Madrid',country:'Spain'}}}
+    lastLocation:{agent:{latitude:40.4,longitude:-3.7,accuracy:25,date:'2026-07-09T11:59:00Z',address:{city:'Madrid',country:'Spain'}}}
   });
   const intune = normalizeIntune({ id:'i1', deviceName:'Surface', operatingSystem:'Windows', complianceState:'compliant', serialNumber:'SER-2' });
   const jamf = normalizeJamf({ id:'j1', general:{ name:'Mac', platform:'macOS', serialNumber:'SER-3' } });
@@ -33,10 +34,19 @@ test('provider normalizers produce the common read-only device shape', () => {
   assert.equal(applivery.locationObservedAt, '2026-07-09T11:59:00Z');
   assert.equal(applivery.cityName, 'Madrid');
   assert.equal(applivery.locationAccuracy, 'precise_mdm');
+  assert.equal(applivery.accuracyM, 25);
   assert.equal(applivery.risk, 'high');
   assert.equal(intune.compliant, true);
   assert.equal(jamf.compliant, null);
+  assert.equal(normalizeGateway({id:'g1',lat:40.4,lng:-3.7,accuracyM:12}).accuracyM,12);
   for (const item of [applivery,intune,jamf]) assert.equal(item.readOnly, true);
+});
+
+test('trusted UEM accuracy survives normalization and enables server geofencing',()=>{
+  const device=normalizeGateway({id:'g2',lat:40.4168,lng:-3.7038,accuracyM:15,locationSource:'mdm',locationAccuracy:'precise_mdm'});
+  const evaluated=evaluateWorkspaceGeofences({devices:[device],geofences:[{id:'hq',lat:40.4168,lng:-3.7038,radiusM:100}]},{trustedSource:true});
+  assert.equal(evaluated.devices[0].fenceState,'inside');
+  assert.equal(evaluated.devices[0].locationQuality,'accepted');
 });
 
 test('mergeDevices deduplicates cross-UEM by serial and preserves evidence', () => {

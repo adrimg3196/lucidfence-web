@@ -55,8 +55,19 @@ test('Docker BYOI serves an explicit static allowlist only', async () => {
   assert.doesNotMatch(dockerfile, /COPY[^\n]*\s\.\s+\/usr\/share\/nginx\/html/);
   for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'web-uem.js', 'web-fleet.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
   for (const privatePath of ['.git', '.env', 'api', 'tests', '.github']) assert.ok(ignore.includes(privatePath));
-  const copied = dockerfile.match(/^COPY(?:\s+--\S+)?\s+(.+)\s+\/usr\/share\/nginx\/html\/$/m)?.[1].split(/\s+/) ?? [];
+  const copied = dockerfile.split('\n').filter(line=>line.startsWith('COPY ')).flatMap(line=>{
+    const tokens=line.trim().split(/\s+/).slice(1).filter(token=>!token.startsWith('--'));
+    return tokens.slice(0,-1);
+  });
   for (const file of copied) assert.match(ignore,new RegExp(`^!${file.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}$`,'m'),`${file} missing from Docker context`);
+});
+
+test('customer Pages template uploads only the explicit PWA artifact',async()=>{
+  const [entrypoint,workflow]=await Promise.all([read('index.html'),read('deploy/github-pages.yml')]);
+  const scripts=[...entrypoint.matchAll(/<script\s+[^>]*src=["'](?:\.\/)?([^:"']+)["']/g)].map(match=>match[1]);
+  assert.match(workflow,/path:\s+_site/);
+  assert.doesNotMatch(workflow,/path:\s+\.$/m);
+  for(const script of scripts)assert.ok(workflow.includes(script),`${script} missing from customer Pages artifact`);
 });
 
 test('Pages executes the full gate before uploading production', async () => {
