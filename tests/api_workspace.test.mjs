@@ -92,7 +92,7 @@ test('cloud sync saves through the revision-checked RPC', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('cloud sync recomputes geofences server-side and rejects stale client claims', async () => {
+test('cloud sync never treats browser-provided coordinates as authoritative', async () => {
   const originalFetch = globalThis.fetch;
   let rpc;
   globalThis.fetch = async (url, options) => {
@@ -119,10 +119,9 @@ test('cloud sync recomputes geofences server-side and rejects stale client claim
     assert.equal(res.statusCode, 200);
     const saved = JSON.parse(rpc.options.body).new_payload.devices;
     assert.deepEqual(saved.map(device => [device.id, device.fenceState, device.matchedFenceId]), [
-      ['fresh', 'inside', 'hq'], ['stale', 'unknown', null], ['imprecise', 'unknown', null]
+      ['fresh', 'unknown', null], ['stale', 'unknown', null], ['imprecise', 'unknown', null]
     ]);
-    assert.equal(saved[1].locationRejectionReason, 'stale');
-    assert.equal(saved[2].locationRejectionReason, 'inaccurate');
+    assert.ok(saved.every(device => device.locationRejectionReason === 'unverified_source'));
   } finally { globalThis.fetch = originalFetch; }
 });
 

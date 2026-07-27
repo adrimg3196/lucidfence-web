@@ -71,6 +71,9 @@ function validFences(value) {
 
 export function evaluateWorkspaceGeofences(state, options = {}) {
   if (!state || typeof state !== 'object' || Array.isArray(state) || !Array.isArray(state.devices)) return state;
+  if (options.trustedSource !== true) {
+    return { ...state, devices: state.devices.map(device => rejected(device, 'unverified_source')) };
+  }
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
   const maxAgeMs = Number.isFinite(options.maxAgeMs) && options.maxAgeMs >= 0 ? options.maxAgeMs : DEFAULT_MAX_AGE_MS;
   const maxAccuracyM = Number.isFinite(options.maxAccuracyM) && options.maxAccuracyM >= 0 ? options.maxAccuracyM : DEFAULT_MAX_ACCURACY_M;
