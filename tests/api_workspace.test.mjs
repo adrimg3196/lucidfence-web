@@ -126,6 +126,44 @@ test('cloud sync recomputes geofences server-side and rejects stale client claim
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('workspace mutations authenticate before parsing or geofence evaluation', async () => {
+  const { default: handler } = await import('../api/workspaces/state.js');
+  const request = req({ method: 'PUT', body: {
+    workspaceId: 'not-a-uuid', expectedRevision: 1,
+    state: { devices: Array.from({ length: 10000 }, (_, id) => ({ id })), geofences: Array.from({ length: 10000 }, (_, id) => ({ id })) }
+  } });
+  request.headers.cookie = '';
+  const res = response();
+  await handler(request, res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(data(res).error, 'authentication_required');
+});
+
+test('cloud sync rejects excessive geofence work before database write', async () => {
+  const originalFetch = globalThis.fetch;
+  let databaseWrites = 0;
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/auth/v1/user')) return userResponse();
+    databaseWrites += 1;
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const { default: handler } = await import('../api/workspaces/state.js');
+    const res = response();
+    const observedAt = new Date().toISOString();
+    await handler(req({ method: 'PUT', body: {
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expectedRevision: 1,
+      state: {
+        devices: Array.from({ length: 1001 }, (_, id) => ({ id: String(id), lat: 1, lng: 1, observedAt, accuracyM: 1 })),
+        geofences: Array.from({ length: 251 }, (_, id) => ({ id: String(id), lat: 1, lng: 1, radiusM: 10 }))
+      }
+    } }), res);
+    assert.equal(res.statusCode, 400);
+    assert.equal(data(res).error, 'geofence_work_limit_exceeded');
+    assert.equal(databaseWrites, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('cloud sync rejects secrets before any database write', async () => {
   const originalFetch = globalThis.fetch;
   let databaseWrites = 0;

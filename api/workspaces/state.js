@@ -12,6 +12,7 @@ function revision(value) {
 export default async function handler(req, res) {
   try {
     const method = allowMethod(req, ['GET', 'PUT']);
+    const { accessToken, client } = await requireUser(req, res);
     let targetId;
     let expectedRevision;
     let cleanState;
@@ -23,13 +24,16 @@ export default async function handler(req, res) {
       const body = readJson(req);
       targetId = workspaceId(body.workspaceId);
       expectedRevision = revision(body.expectedRevision);
+      const devices = Array.isArray(body?.state?.devices) ? body.state.devices.length : 0;
+      const geofences = Array.isArray(body?.state?.geofences) ? body.state.geofences.length : 0;
+      if (devices > 1000 || geofences > 250 || devices * geofences > 50_000) {
+        throw new HttpError(400, 'geofence_work_limit_exceeded', 'Workspace geofence evaluation exceeds safe limits');
+      }
       cleanState = evaluateWorkspaceGeofences(safeWorkspaceState(body.state));
       if (!cleanState || Array.isArray(cleanState) || typeof cleanState !== 'object') {
         throw new HttpError(400, 'invalid_workspace_state', 'Workspace state must be an object');
       }
     }
-
-    const { accessToken, client } = await requireUser(req, res);
     if (method === 'GET') {
       const query = `?select=workspace_id,payload,revision,updated_at&workspace_id=eq.${encodeURIComponent(targetId)}&limit=1`;
       const { payload } = await client.json(`/rest/v1/workspace_state${query}`, { accessToken });
