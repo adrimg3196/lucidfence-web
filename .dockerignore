@@ -6,7 +6,6 @@
 !web-store.js
 !web-cloud.js
 !web-uem.js
-!web-fleet.js
 !web-app.js
 !web-worker.js
 !sw.js

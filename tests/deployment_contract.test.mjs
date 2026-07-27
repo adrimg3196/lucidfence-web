@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 const root = new URL('../', import.meta.url);
 const read = name => readFile(new URL(name, root), 'utf8');
@@ -53,7 +57,7 @@ test('Docker BYOI serves an explicit static allowlist only', async () => {
   const dockerfile = await read('deploy/Dockerfile');
   const ignore = await read('.dockerignore');
   assert.doesNotMatch(dockerfile, /COPY[^\n]*\s\.\s+\/usr\/share\/nginx\/html/);
-  for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'web-uem.js', 'web-fleet.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
+  for (const file of ['index.html', 'web-core.js', 'web-cloud.js', 'web-uem.js', 'runtime.json']) assert.ok(dockerfile.includes(file));
   for (const privatePath of ['.git', '.env', 'api', 'tests', '.github']) assert.ok(ignore.includes(privatePath));
   const copied = dockerfile.split('\n').filter(line=>line.startsWith('COPY ')).flatMap(line=>{
     const tokens=line.trim().split(/\s+/).slice(1).filter(token=>!token.startsWith('--'));
@@ -101,4 +105,18 @@ test('Supabase guide uses a pinned local CLI through npx', async () => {
 test('cloud guide lists every connector migration through the dedicated RPC verifier', async () => {
   const guide = await read('DEPLOY_CLOUD.md');
   for (const migration of ['202607220003_connector_server_proof.sql','202607220004_exact_connector_envelope.sql','202607220005_fix_connector_upsert_conflict.sql','202607220006_dedicated_connector_rpc_secret.sql']) assert.ok(guide.includes(migration), migration);
+});
+
+test('release builds packages only tracked files with no secrets', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'lucidfence-rel-'));
+  try {
+    execFileSync('bash', ['scripts/build-release.sh'], { cwd: root.pathname, stdio: 'pipe', env: { ...process.env, GITHUB_REF_NAME: '', TMPDIR: workspace } });
+    const out = execFileSync('unzip', ['-l', join(root.pathname, 'dist', 'lucidfence-web-cloud-1.1.1.zip')], { encoding: 'utf8' });
+    assert.ok(out.includes('api/runtime.js'));
+    assert.ok(out.includes('supabase/migrations/202607220006_dedicated_connector_rpc_secret.sql'));
+    assert.match(out, /web-uem\.js/);
+    for (const forbidden of ['tests/', '.env\n', 'node_modules/']) assert.doesNotMatch(out, new RegExp(forbidden.replace(/[./]/g, '\\$&')));
+  } finally {
+    if (existsSync(join(root.pathname, 'dist'))) rmSync(join(root.pathname, 'dist'), { recursive: true, force: true });
+  }
 });

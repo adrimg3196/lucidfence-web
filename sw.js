@@ -1,5 +1,5 @@
 const CACHE='lucidfence-web-v3';
-const ASSETS=['./web.html','./web-core.js','./web-store.js','./web-cloud.js','./web-uem.js','./web-fleet.js','./web-app.js','./web-worker.js','./manifest.webmanifest','./lucidfence-icon.svg'];
+const ASSETS=['./web.html','./web-core.js','./web-store.js','./web-cloud.js','./web-uem.js','./web-app.js','./web-worker.js','./manifest.webmanifest','./lucidfence-icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('lucidfence-web-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{

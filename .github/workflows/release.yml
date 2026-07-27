@@ -18,7 +18,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm test
+      - run: npm run check
       - name: Build reproducible distributions
         run: bash scripts/build-release.sh
       - uses: softprops/action-gh-release@v2

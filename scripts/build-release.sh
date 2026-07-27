@@ -17,7 +17,7 @@ rm -rf "$DIST"
 mkdir -p "$DIST" "$TMP/local" "$TMP/cloud"
 
 LOCAL_FILES=(
-  index.html web.html web-core.js web-store.js web-cloud.js web-uem.js web-fleet.js web-app.js web-worker.js
+  index.html web.html web-core.js web-store.js web-cloud.js web-uem.js web-app.js web-worker.js
   sw.js runtime.json manifest.webmanifest lucidfence-icon.svg .nojekyll
   README.md SELF_HOST.md LICENSE
 )
@@ -30,9 +30,10 @@ cp -R deploy gateway "$TMP/local/"
 
 while IFS= read -r -d '' file; do
   [[ -f "$file" ]] || continue
+  case "$file" in tests/*|dist/*|plans/*|scripts/build-release.sh) continue;; esac
   mkdir -p "$TMP/cloud/$(dirname "$file")"
   cp "$file" "$TMP/cloud/$file"
-done < <(git ls-files -co --exclude-standard -z)
+done < <(git ls-files -z)
 [[ -f "$TMP/cloud/api/runtime.js" ]] || { echo "Cloud bundle missing api/" >&2; exit 1; }
 [[ -f "$TMP/cloud/supabase/migrations/202607210001_initial.sql" ]] || { echo "Cloud bundle missing supabase/" >&2; exit 1; }
 (

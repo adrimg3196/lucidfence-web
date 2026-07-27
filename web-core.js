@@ -44,7 +44,7 @@
       {id:'web-006',name:'Chromebook Kiosco F6',platform:'ChromeOS',fenceState:'inside',risk:'low',compliant:true,lat:40.419,lng:-3.701}
     ],
     geofences:[{id:'fence-madrid',name:'Operación Madrid',lat:40.4168,lng:-3.7038,radiusM:900}],
-    settings:{mode:'demo',gatewayUrl:''},updatedAt:now()
+    settings:{mode:'demo'},updatedAt:now()
   };}
   function clone(value){return JSON.parse(JSON.stringify(value));}
   function distanceM(aLat,aLng,bLat,bLng){

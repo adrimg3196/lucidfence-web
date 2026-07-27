@@ -58,11 +58,6 @@ test('Multi-UEM BFF denies viewer role',async()=>{
   try{const {default:handler}=await import('../api/uem/index.js');const response=res();await handler(req(),response);assert.equal(response.statusCode,403);assert.equal(JSON.parse(response.body).error,'workspace_role_denied');}finally{globalThis.fetch=original;}
 });
 
-test('legacy Fleet-only endpoint is retired and cannot bypass workspace binding',async()=>{
-  const original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls+=1;return authUser();};
-  try{const {default:handler}=await import('../api/fleet/hosts.js');const response=res();await handler(req(),response);assert.equal(response.statusCode,410);assert.equal(JSON.parse(response.body).error,'fleet_endpoint_moved');assert.equal(calls,1);}finally{globalThis.fetch=original;}
-});
-
 test('Multi-UEM ingestion source contains no destructive device command routes',async()=>{
   const {readFile}=await import('node:fs/promises');const source=await readFile(new URL('../api/_lib/uem.js',import.meta.url),'utf8');assert.doesNotMatch(source,/remoteLock|eraseDevice|\/commands|factory_reset|wipe/i);
 });
