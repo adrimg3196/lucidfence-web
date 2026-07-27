@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const migrationUrl = new URL('../supabase/migrations/202607210001_initial.sql', import.meta.url);
 const conflictMigrationUrl = new URL('../supabase/migrations/202607220001_revision_conflict_status.sql', import.meta.url);
+const functionAclMigrationUrl = new URL('../supabase/migrations/202607270001_lock_down_function_acl.sql', import.meta.url);
 
 async function migration() {
   return readFile(migrationUrl, 'utf8');
@@ -75,4 +76,17 @@ test('anonymous role has no direct tenant table privileges', async () => {
   assert.ok(sql.includes('revoke all on public.workspaces from anon'));
   assert.ok(sql.includes('revoke all on public.workspace_members from anon'));
   assert.ok(sql.includes('revoke all on public.workspace_state from anon'));
+});
+
+test('function ACL migration removes default public and anon execution', async () => {
+  const sql = (await readFile(functionAclMigrationUrl, 'utf8')).toLowerCase();
+  assert.ok(sql.includes('alter default privileges in schema public revoke execute on functions from public'));
+  assert.ok(sql.includes('revoke execute on all functions in schema public from public, anon'));
+  assert.ok(sql.includes('grant execute on function public.create_workspace(text) to authenticated'));
+  assert.ok(sql.includes('grant execute on function public.save_workspace_state(uuid, bigint, jsonb) to authenticated'));
+  assert.ok(sql.includes('grant execute on function public.list_workspace_uem_connectors(uuid) to authenticated'));
+  assert.ok(sql.includes('grant execute on function public.load_workspace_uem_connector(uuid, text, text) to authenticated'));
+  assert.ok(sql.includes('grant execute on function public.upsert_workspace_uem_connector(uuid, text, text, text, text) to authenticated'));
+  assert.ok(sql.includes('grant execute on function public.delete_workspace_uem_connector(uuid, text, text) to authenticated'));
+  assert.doesNotMatch(sql, /grant execute on function public\.(?:verify_uem_connector_server_proof|rls_auto_enable)/);
 });
