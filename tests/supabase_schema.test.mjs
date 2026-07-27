@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const migrationUrl = new URL('../supabase/migrations/202607210001_initial.sql', import.meta.url);
 const conflictMigrationUrl = new URL('../supabase/migrations/202607220001_revision_conflict_status.sql', import.meta.url);
 const functionAclMigrationUrl = new URL('../supabase/migrations/202607270001_lock_down_function_acl.sql', import.meta.url);
+const internalFunctionAclMigrationUrl = new URL('../supabase/migrations/202607270002_lock_down_internal_function_acl.sql', import.meta.url);
 
 async function migration() {
   return readFile(migrationUrl, 'utf8');
@@ -89,4 +90,10 @@ test('function ACL migration removes default public and anon execution', async (
   assert.ok(sql.includes('grant execute on function public.upsert_workspace_uem_connector(uuid, text, text, text, text) to authenticated'));
   assert.ok(sql.includes('grant execute on function public.delete_workspace_uem_connector(uuid, text, text) to authenticated'));
   assert.doesNotMatch(sql, /grant execute on function public\.(?:verify_uem_connector_server_proof|rls_auto_enable)/);
+});
+
+test('internal function ACL migration revokes authenticated execution explicitly', async () => {
+  const sql = (await readFile(internalFunctionAclMigrationUrl, 'utf8')).toLowerCase();
+  assert.ok(sql.includes('revoke execute on function public.verify_uem_connector_server_proof(text) from authenticated'));
+  assert.ok(sql.includes('revoke execute on function public.rls_auto_enable() from authenticated'));
 });
