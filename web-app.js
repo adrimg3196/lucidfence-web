@@ -106,7 +106,7 @@
     const workspace=cloudWorkspaces.find(item=>item.id===activeWorkspaceId),canManage=['owner','admin'].includes(workspace?.role),canSync=['owner','admin','operator'].includes(workspace?.role);
     $('#syncAllUem').disabled=!canSync;
     if(!cloudUser||!activeWorkspaceId){renderUemWizard(false);grid.innerHTML='<div class="integration-empty">Inicia sesión y selecciona un workspace para gestionar integraciones.</div>';$('#uemBindingHint').textContent='Selecciona o crea un workspace cloud para empezar.';return;}
-    if(canManage&&uemCatalogLoaded&&!uemConnectors.some(item=>item.configured)&&!wizardSeenWorkspaces.has(activeWorkspaceId)){wizardSeenWorkspaces.add(activeWorkspaceId);resetConnectorFlow();uemWizardOpen=true;}
+    if(canManage&&uemCatalogLoaded&&!uemConnectors.some(item=>item.configured)&&!wizardSeenWorkspaces.has(activeWorkspaceId)){wizardSeenWorkspaces.add(activeWorkspaceId);resetConnectorFlow();uemWizardOpen=true;showView('connect');}
     renderUemWizard(canManage);
     const binding=`${workspace?.name||'Workspace'} · ${canManage?'Puedes configurar, rotar y sincronizar.':canSync?'Puedes sincronizar, pero no gestionar credenciales.':'Tu rol es de solo lectura; no puede sincronizar ni gestionar credenciales.'}`;
     $('#uemBindingHint').textContent=uemStatusMessage?`${binding} · ${uemStatusMessage}`:binding;
