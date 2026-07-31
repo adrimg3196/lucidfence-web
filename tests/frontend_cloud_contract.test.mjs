@@ -42,12 +42,14 @@ test('frontend binds auth and prevents cross-workspace push without pull', async
 });
 
 test('dashboard exposes a guided connector vault without legacy browser token storage',async()=>{
-  const html=await read('web.html'),source=await read('web-app.js'),client=await read('web-uem.js');
-  for(const id of ['connectorGrid','connectorModal','connectorForm','connectorFields','connectorError','connectorSave','connectorDelete','connectorClose'])assert.match(html,new RegExp(`id="${id}"`));
+  const html=await read('web.html'),index=await read('index.html'),source=await read('web-app.js'),client=await read('web-uem.js');
+  assert.equal(html,index,'index.html and web.html must remain byte-identical');
+  for(const id of ['connectorGrid','uemWizard','uemWizardForm','uemWizardOptions','uemWizardAll','uemWizardSelection','uemWizardMeter','uemWizardCancel','openUemWizard','connectorModal','connectorForm','connectorFields','connectorError','connectorSave','connectorDelete','connectorClose'])assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(html,/id="openUemWizard" aria-controls="uemWizard" aria-expanded="false"/);
   assert.match(html,/Centro de integraciones|CENTRO DE INTEGRACIONES/);
   assert.match(html,/Cifrado AES-256-GCM/);
   assert.match(html,/Nunca se muestran de nuevo/);
-  for(const fragment of ['refreshUemConnectors(', 'openConnectorModal(', 'saveConnector(', 'deleteConnector(', 'form.reset()'])assert.ok(source.includes(fragment),`missing ${fragment}`);
+  for(const fragment of ['refreshUemConnectors(', 'openUemWizard(', 'startUemWizard(', 'openConnectorModal(', 'saveConnector(', 'deleteConnector(', 'form.reset()', 'connectorQueue=selected'])assert.ok(source.includes(fragment),`missing ${fragment}`);
   assert.match(client,/\/api\/uem\/connectors/);
   assert.match(source,/canSync=\['owner','admin','operator'\]\.includes\(workspace\?\.role\)/);
   assert.match(source,/\$\('#syncAllUem'\)\.disabled=!canSync/);
@@ -57,8 +59,8 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.match(source,/if\(!activeConnectorWorkspaceId\|\|activeConnectorWorkspaceId!==activeWorkspaceId\)/);
   assert.match(source,/targetWorkspace=activeConnectorWorkspaceId/);
   assert.match(source,/function closeConnectorModal\(force=false\)[\s\S]*if\(connectorSaving&&!force\)return[\s\S]*input\[type="password"\]/);
-  assert.match(source,/async function logoutCloud\(\)\{\s*uemRefreshSequence\+=1;closeConnectorModal\(true\);\s*try\{await cloud\.logout\(\)/);
-  assert.match(source,/cloudWorkspaceSelect'\)\.addEventListener\('change',async event=>\{closeConnectorModal\(true\);uemRefreshSequence\+=1;activeWorkspaceId=/);
+  assert.match(source,/async function logoutCloud\(\)\{\s*uemRefreshSequence\+=1;resetConnectorFlow\(\);closeUemWizard\(false\);closeConnectorModal\(true\);/);
+  assert.match(source,/cloudWorkspaceSelect'\)\.addEventListener\('change',async event=>\{closeConnectorModal\(true\);uemRefreshSequence\+=1;resetConnectorFlow\(\);closeUemWizard\(false\);/);
   assert.match(source,/sequence=\+\+uemRefreshSequence,targetWorkspace=activeWorkspaceId/);
   assert.match(source,/if\(sequence!==uemRefreshSequence\|\|targetWorkspace!==activeWorkspaceId\|\|!cloudUser\)return/);
   assert.match(source,/if\(connectorSaving\|\|!form\.reportValidity\(\)/);
@@ -66,6 +68,28 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.match(source,/async function testConnector/);
   assert.match(source,/connector_credentials_rejected/);
   assert.match(source,/data-reveal/);
+  assert.match(source,/if\(saved\)\{closeConnectorModal\(\);const next=connectorQueue\[0\][\s\S]*if\(openConnectorModal\(next,true\)\)connectorQueue\.shift\(\)/);
+  assert.match(source,/const first=connectorQueue\[0\];if\(openConnectorModal\(first,true\)\)connectorQueue\.shift\(\)/);
+  assert.match(source,/function cancelConnectorFlow\(\)\{if\(connectorSaving\)return;resetConnectorFlow\(\);closeConnectorModal\(\);\}/);
+  assert.match(source,/connectorOpener=fromWizard\?\$\('#openUemWizard'\):document\.activeElement/);
+  assert.match(source,/function syncUemWizardAll\(\)[\s\S]*all\.indeterminate=checked>0&&checked<total[\s\S]*uemWizardMeter/);
+  assert.match(source,/connectorFlowTotal=selected\.length;connectorFlowStep=1/);
+  assert.match(source,/UEM \$\{connectorFlowStep\} de \$\{connectorFlowTotal\}/);
+  assert.match(html,/Construye tu stack UEM/);
+  assert.match(html,/wizard-provider-mark/);
+  assert.match(source,/if\(connectorResult\.status==='fulfilled'\)\{uemConnectors=connectorResult\.value;uemCatalogLoaded=true;\}else uemCatalogLoaded=false/);
+  assert.doesNotMatch(source,/connectorResult\.status==='fulfilled'\?connectorResult\.value:\[\]/);
+  assert.match(source,/openingWorkspaceId=activeWorkspaceId[\s\S]*await refreshUemConnectors\(\)[\s\S]*activeWorkspaceId!==openingWorkspaceId[\s\S]*owner','admin/);
+  assert.match(source,/if\(canManage&&uemCatalogLoaded&&!uemConnectors\.some/);
+  assert.match(source,/availableAccess=canManage&&uemCatalogLoaded/);
+  assert.match(source,/async function openUemWizard\(\)[\s\S]*if\(!uemCatalogLoaded\)[\s\S]*await refreshUemConnectors\(\)[\s\S]*No se pudo cargar el catálogo UEM/);
+  assert.match(source,/function closeUemWizard\(returnFocus=true\)[\s\S]*aria-expanded'[\s\S]*trigger\.focus\(\)/);
+  assert.match(html,/aria-describedby="connectorSubtitle connectorGuide connectorProgress"/);
+  assert.match(html,/id="connectorSubtitle" aria-live="polite"/);
+  assert.match(source,/wizardSelection\.has\(item\.id\)\?' checked'/);
+  assert.match(source,/wizardSelection\.clear\(\);checkedBoxes\.forEach\(input=>wizardSelection\.add\(input\.value\)\)/);
+  assert.match(source,/wizardSeenWorkspaces\.clear\(\)/);
+  assert.match(source,/dialog\.setAttribute\('aria-busy','true'\)[\s\S]*dialog\.removeAttribute\('aria-busy'\)/);
   assert.match(source,/setConnectorBackgroundInert\(true\)/);
   assert.match(source,/#view-connect > :not\(#connectorModal\)/);
   assert.match(source,/classList\.add\('connector-modal-open'\)/);

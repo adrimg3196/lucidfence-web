@@ -3,7 +3,8 @@
   let state=null;
   const cloud=LucidFenceCloud.create();
   const uem=LucidFenceUem.create(cloud,LucidFenceWeb.sanitizeImport);
-  let cloudAvailable=false,cloudResolved=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemConnectors=[],uemStatusMessage='',authGateVisible=false,activeConnectorId='',activeConnectorWorkspaceId='',uemRefreshSequence=0,connectorSaving=false,connectorChecks=new Map(),connectorOpener=null,connectorOpenerProviderId='';
+  let cloudAvailable=false,cloudResolved=false,cloudUser=null,cloudWorkspaces=[],cloudOAuthProviders=[],activeWorkspaceId='',uemProviders=[],uemConnectors=[],uemCatalogLoaded=false,uemStatusMessage='',authGateVisible=false,activeConnectorId='',activeConnectorWorkspaceId='',uemRefreshSequence=0,connectorSaving=false,connectorChecks=new Map(),connectorOpener=null,connectorOpenerProviderId='',uemWizardOpen=false,connectorQueue=[],connectorFlowTotal=0,connectorFlowStep=0;
+  const wizardSeenWorkspaces=new Set(),wizardSelection=new Set();
   const $=selector=>document.querySelector(selector);
   const $$=selector=>Array.from(document.querySelectorAll(selector));
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -75,12 +76,38 @@
     renderConnectorCenter();
   }
   function connectorDescription(id){return({fleetdm:'Endpoint y token API de solo lectura.',applivery:'Service Account de Organizations API.',intune:'Aplicación Entra con permisos Graph read-only.',jamf:'API Role con Client Credentials.', 'custom-gateway':'Gateway BYOI para otros UEM.'})[id]||'Conector UEM de solo lectura.';}
+  function connectorMark(id,name){return({fleetdm:'FD',applivery:'AP',intune:'IN',jamf:'JF','custom-gateway':'+'})[id]||name.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase();}
   function connectorGuide(id){return({fleetdm:'Necesitas una URL pública de Fleet y un API token con acceso de lectura a hosts.',applivery:'Usa el Organization ID y un Service Account token limitado a consulta.',intune:'Crea una app en Entra con permisos Graph de lectura y pega tenant, client ID y secret.',jamf:'Usa un API Role de solo lectura con Client Credentials.', 'custom-gateway':'El gateway debe exponer /v1/fleet por HTTPS público y aceptar Bearer token.'})[id]||'Usa una credencial dedicada con el mínimo permiso de lectura.';}
+  function renderUemWizard(canManage){
+    const trigger=$('#openUemWizard'),availableAccess=canManage&&uemCatalogLoaded;trigger.disabled=!canManage;trigger.setAttribute('aria-expanded',String(uemWizardOpen&&availableAccess));
+    const wizard=$('#uemWizard');wizard.classList.toggle('cloud-hidden',!uemWizardOpen||!availableAccess);
+    if(!uemWizardOpen||!availableAccess)return;
+    const available=uemConnectors.filter(item=>!item.configured);
+    $('#uemWizardOptions').innerHTML=available.map(item=>`<label class="wizard-choice"><input type="checkbox" name="provider" value="${esc(item.id)}"${wizardSelection.has(item.id)?' checked':''}><span class="wizard-provider-mark" aria-hidden="true">${esc(connectorMark(item.id,item.name))}</span><span class="wizard-provider-copy"><strong>${esc(item.name)}</strong><small>${esc(connectorDescription(item.id))}</small></span><span class="wizard-choice-check" aria-hidden="true"></span></label>`).join('')||'<div class="integration-empty">Todos los UEM disponibles ya están configurados.</div>';
+    const all=$('#uemWizardAll');all.checked=false;all.indeterminate=false;all.disabled=!available.length;syncUemWizardAll();$('#uemWizardError').classList.add('cloud-hidden');
+  }
+  function syncUemWizardAll(){
+    const boxes=$$('#uemWizardOptions input[name="provider"]'),checkedBoxes=boxes.filter(input=>input.checked),checked=checkedBoxes.length,total=boxes.length,all=$('#uemWizardAll');wizardSelection.clear();checkedBoxes.forEach(input=>wizardSelection.add(input.value));all.checked=total>0&&checked===total;all.indeterminate=checked>0&&checked<total;$('#uemWizardSelection').textContent=checked?`${checked} de ${total} UEM seleccionados`:'Selecciona tu stack UEM';$('#uemWizardMeter').style.width=`${total?Math.round(checked/total*100):0}%`;
+  }
+  function resetConnectorFlow(){connectorQueue=[];connectorFlowTotal=0;connectorFlowStep=0;wizardSelection.clear();}
+  async function openUemWizard(){
+    const openingWorkspaceId=activeWorkspaceId;let workspace=cloudWorkspaces.find(item=>item.id===openingWorkspaceId);if(!['owner','admin'].includes(workspace?.role)){toast('Solo owner o admin puede añadir UEM');return;}
+    if(!uemCatalogLoaded){const trigger=$('#openUemWizard');trigger.disabled=true;await refreshUemConnectors();workspace=cloudWorkspaces.find(item=>item.id===activeWorkspaceId);if(activeWorkspaceId!==openingWorkspaceId||!['owner','admin'].includes(workspace?.role)){renderConnectorCenter();return;}if(!uemCatalogLoaded){renderConnectorCenter();toast('No se pudo cargar el catálogo UEM. Inténtalo de nuevo.');return;}}
+    resetConnectorFlow();uemWizardOpen=true;renderUemWizard(true);$('#uemWizard').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+  function closeUemWizard(returnFocus=true){uemWizardOpen=false;const trigger=$('#openUemWizard');trigger.setAttribute('aria-expanded','false');$('#uemWizard').classList.add('cloud-hidden');if(returnFocus&&!trigger.disabled)requestAnimationFrame(()=>trigger.focus());}
+  function startUemWizard(event){
+    event.preventDefault();const selected=$$('#uemWizardOptions input[name="provider"]:checked').map(input=>input.value),error=$('#uemWizardError');
+    if(!selected.length){error.textContent='Selecciona al menos un UEM.';error.classList.remove('cloud-hidden');return;}
+    connectorQueue=selected;connectorFlowTotal=selected.length;connectorFlowStep=1;closeUemWizard(false);const first=connectorQueue[0];if(openConnectorModal(first,true))connectorQueue.shift();else{resetConnectorFlow();toast('No pudimos abrir el UEM seleccionado. Vuelve a intentarlo.');}
+  }
   function renderConnectorCenter(){
     const grid=$('#connectorGrid');if(!grid)return;
     const workspace=cloudWorkspaces.find(item=>item.id===activeWorkspaceId),canManage=['owner','admin'].includes(workspace?.role),canSync=['owner','admin','operator'].includes(workspace?.role);
     $('#syncAllUem').disabled=!canSync;
-    if(!cloudUser||!activeWorkspaceId){grid.innerHTML='<div class="integration-empty">Inicia sesión y selecciona un workspace para gestionar integraciones.</div>';$('#uemBindingHint').textContent='Selecciona o crea un workspace cloud para empezar.';return;}
+    if(!cloudUser||!activeWorkspaceId){renderUemWizard(false);grid.innerHTML='<div class="integration-empty">Inicia sesión y selecciona un workspace para gestionar integraciones.</div>';$('#uemBindingHint').textContent='Selecciona o crea un workspace cloud para empezar.';return;}
+    if(canManage&&uemCatalogLoaded&&!uemConnectors.some(item=>item.configured)&&!wizardSeenWorkspaces.has(activeWorkspaceId)){wizardSeenWorkspaces.add(activeWorkspaceId);resetConnectorFlow();uemWizardOpen=true;}
+    renderUemWizard(canManage);
     const binding=`${workspace?.name||'Workspace'} · ${canManage?'Puedes configurar, rotar y sincronizar.':canSync?'Puedes sincronizar, pero no gestionar credenciales.':'Tu rol es de solo lectura; no puede sincronizar ni gestionar credenciales.'}`;
     $('#uemBindingHint').textContent=uemStatusMessage?`${binding} · ${uemStatusMessage}`:binding;
     grid.innerHTML=uemConnectors.map(item=>{const check=connectorChecks.get(item.id),checkText=check?.status==='busy'?'Comprobando acceso…':check?.status==='ok'?`${check.devices} dispositivos accesibles`:check?.status==='error'?check.message:'';return `<article class="integration-card"><div class="integration-card-head"><div class="integration-provider"><span class="integration-logo">${esc(item.name.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase())}</span><div><h3>${esc(item.name)}</h3><p>${esc(connectorDescription(item.id))}</p></div></div><span class="integration-state ${item.configured?'ready':''}">${item.configured?'ACTIVO':'SIN CONFIGURAR'}</span></div><div class="integration-detail">${item.configured?esc(item.hint||'Identidad del proveedor guardada'):'Conecta y valida en una sola operación.'}${checkText?`<div class="integration-check ${esc(check.status)}">${esc(checkText)}</div>`:''}</div><div class="integration-card-actions"><small>${item.updatedAt?'Verificado '+esc(new Date(item.updatedAt).toLocaleDateString('es-ES')):'Credencial cifrada por workspace'}</small><div class="integration-action-group">${item.configured?`<button class="btn" type="button" data-test-connector="${esc(item.id)}" ${canSync&&check?.status!=='busy'?'':'disabled'}>${check?.status==='busy'?'Probando…':'Probar conexión'}</button>`:''}<button class="btn ${item.configured?'':'primary'}" type="button" data-connector="${esc(item.id)}" ${canManage?'':'disabled'}>${item.configured?'Gestionar':'Conectar'}</button></div></div></article>`;}).join('')||'<div class="integration-empty">No se pudo cargar el catálogo de conectores.</div>';
@@ -96,11 +123,11 @@
   }
   async function refreshUemConnectors(){
     const sequence=++uemRefreshSequence,targetWorkspace=activeWorkspaceId;
-    if(!cloudUser||!targetWorkspace){uemProviders=[];uemConnectors=[];uemStatusMessage='';return;}
+    if(!cloudUser||!targetWorkspace){uemProviders=[];uemConnectors=[];uemCatalogLoaded=false;uemStatusMessage='';return;}
     const [statusResult,connectorResult]=await Promise.allSettled([uem.status(targetWorkspace),uem.connectors(targetWorkspace)]);
     if(sequence!==uemRefreshSequence||targetWorkspace!==activeWorkspaceId||!cloudUser)return;
     uemProviders=statusResult.status==='fulfilled'?statusResult.value:[];
-    uemConnectors=connectorResult.status==='fulfilled'?connectorResult.value:[];
+    if(connectorResult.status==='fulfilled'){uemConnectors=connectorResult.value;uemCatalogLoaded=true;}else uemCatalogLoaded=false;
     uemStatusMessage=statusResult.status==='rejected'?'No se pudo consultar el estado UEM.':connectorResult.status==='rejected'?'No se pudo cargar el vault de conectores.':'';
   }
   function setConnectorBackgroundInert(value){$$('.rail,.top,#view-connect > :not(#connectorModal)').forEach(node=>{node.inert=value;});}
@@ -109,20 +136,22 @@
     if(connectorSaving&&!force)return;
     const opener=connectorOpener,openerProviderId=connectorOpenerProviderId;connectorOpener=null;connectorOpenerProviderId='';const modal=$('#connectorModal');modal.classList.add('cloud-hidden');modal.setAttribute('aria-hidden','true');document.body.classList.remove('connector-modal-open');$('#connectorForm').querySelectorAll('input[type="password"],input[data-secret="true"]').forEach(input=>{input.value='';input.type='password';});activeConnectorId='';activeConnectorWorkspaceId='';$('#connectorForm').reset();$('#connectorFields').replaceChildren();$('#connectorError').classList.add('cloud-hidden');connectorProgress('No guardaremos nada si la prueba de conexión falla.');setConnectorBackgroundInert(false);if(opener?.isConnected&&!opener.disabled)requestAnimationFrame(()=>opener.focus());else{const replacement=$$('#connectorGrid [data-connector]').find(button=>button.dataset.connector===openerProviderId);if(replacement&&!replacement.disabled)requestAnimationFrame(()=>replacement.focus());}
   }
-  function openConnectorModal(providerId){
-    if(connectorSaving){toast('Espera a que termine la operación de credenciales');return;}
-    const connector=uemConnectors.find(item=>item.id===providerId);if(!connector||!activeWorkspaceId)return;
-    connectorOpener=document.activeElement instanceof HTMLElement?document.activeElement:null;connectorOpenerProviderId=providerId;activeConnectorId=providerId;activeConnectorWorkspaceId=activeWorkspaceId;$('#connectorTitle').textContent=`${connector.configured?'Gestionar':'Conectar'} ${connector.name}`;$('#connectorSubtitle').textContent=connector.configured?'Pega el conjunto completo para reemplazar la credencial actual.':'Completa los datos; probaremos el acceso antes de guardar.';$('#connectorGuide').textContent=connectorGuide(providerId);
+  function cancelConnectorFlow(){if(connectorSaving)return;resetConnectorFlow();closeConnectorModal();}
+  function openConnectorModal(providerId,fromWizard=false){
+    if(connectorSaving){toast('Espera a que termine la operación de credenciales');return false;}
+    if(!fromWizard)resetConnectorFlow();
+    const connector=uemConnectors.find(item=>item.id===providerId);if(!connector||!activeWorkspaceId)return false;
+    connectorOpener=fromWizard?$('#openUemWizard'):document.activeElement instanceof HTMLElement?document.activeElement:null;connectorOpenerProviderId=providerId;activeConnectorId=providerId;activeConnectorWorkspaceId=activeWorkspaceId;$('#connectorTitle').textContent=`${connector.configured?'Gestionar':'Conectar'} ${connector.name}`;const subtitle=connector.configured?'Pega el conjunto completo para reemplazar la credencial actual.':'Completa los datos; probaremos el acceso antes de guardar.';$('#connectorSubtitle').textContent=fromWizard&&connectorFlowTotal>1?`UEM ${connectorFlowStep} de ${connectorFlowTotal} · ${subtitle}`:subtitle;$('#connectorGuide').textContent=connectorGuide(providerId);
     let secretStarted=false;$('#connectorFields').innerHTML=connector.fields.map((field,index)=>{const startsSecret=field.secret&&!secretStarted;if(field.secret)secretStarted=true;const section=index===0?'<div class="connector-field-section">DATOS DEL PROVEEDOR</div>':startsSecret?'<div class="connector-field-section">CREDENCIAL DE SOLO LECTURA</div>':'';const input=`<input class="auth-input" id="connector-${esc(field.id)}" name="${esc(field.id)}" type="${field.secret?'password':field.type==='url'?'url':'text'}" ${field.secret?'data-secret="true" ':''}${field.required?'required':''} maxlength="${field.secret?'4096':'512'}" autocomplete="${field.secret?'new-password':'off'}" placeholder="${esc(field.placeholder||'')}">`;return `${section}<div class="connector-field"><label for="connector-${esc(field.id)}">${esc(field.label)}</label>${field.secret?`<div class="secret-input-wrap">${input}<button class="secret-toggle" type="button" data-reveal="connector-${esc(field.id)}" aria-label="Mostrar ${esc(field.label)}">Mostrar</button></div>`:input}<small>${field.secret?'Se usa una vez para probar y cifrar; nunca se vuelve a mostrar.':field.required?'Campo obligatorio.':'Opcional; usaremos el valor recomendado.'}</small></div>`;}).join('');
-    $('#connectorDelete').classList.toggle('cloud-hidden',!connector.configured);document.body.classList.add('connector-modal-open');$('#connectorError').classList.add('cloud-hidden');connectorProgress('No guardaremos nada si la prueba de conexión falla.');const modal=$('#connectorModal');modal.classList.remove('cloud-hidden');modal.setAttribute('aria-hidden','false');setConnectorBackgroundInert(true);requestAnimationFrame(()=>$('#connectorFields input')?.focus());
+    $('#connectorDelete').classList.toggle('cloud-hidden',!connector.configured);document.body.classList.add('connector-modal-open');$('#connectorError').classList.add('cloud-hidden');connectorProgress('No guardaremos nada si la prueba de conexión falla.');const modal=$('#connectorModal');modal.classList.remove('cloud-hidden');modal.setAttribute('aria-hidden','false');setConnectorBackgroundInert(true);requestAnimationFrame(()=>$('#connectorFields input')?.focus());return true;
   }
   function connectorError(message){const node=$('#connectorError');node.textContent=message;node.classList.toggle('cloud-hidden',!message);}
   async function saveConnector(event){
-    event.preventDefault();const form=event.currentTarget;if(connectorSaving||!form.reportValidity()||!activeConnectorId)return;if(!activeConnectorWorkspaceId||activeConnectorWorkspaceId!==activeWorkspaceId){closeConnectorModal(true);toast('El workspace cambió; vuelve a abrir el conector');return;}const button=$('#connectorSave'),provider=activeConnectorId,targetWorkspace=activeConnectorWorkspaceId,deleteButton=$('#connectorDelete'),closeButton=$('#connectorClose');let saved=false;connectorSaving=true;button.disabled=true;deleteButton.disabled=true;closeButton.disabled=true;button.textContent='Probando conexión…';connectorProgress('Contactando con el proveedor mediante un canal seguro…','busy');connectorError('');
+    event.preventDefault();const form=event.currentTarget;if(connectorSaving||!form.reportValidity()||!activeConnectorId)return;if(!activeConnectorWorkspaceId||activeConnectorWorkspaceId!==activeWorkspaceId){closeConnectorModal(true);toast('El workspace cambió; vuelve a abrir el conector');return;}const button=$('#connectorSave'),provider=activeConnectorId,targetWorkspace=activeConnectorWorkspaceId,deleteButton=$('#connectorDelete'),closeButton=$('#connectorClose'),dialog=$('#connectorModal .connector-dialog');let saved=false;connectorSaving=true;dialog.setAttribute('aria-busy','true');button.disabled=true;deleteButton.disabled=true;closeButton.disabled=true;button.textContent='Probando conexión…';connectorProgress('Contactando con el proveedor mediante un canal seguro…','busy');connectorError('');
     try{const config=Object.fromEntries(new FormData(form).entries()),result=await uem.saveConnector(targetWorkspace,provider,config);form.reset();if(targetWorkspace===activeWorkspaceId&&cloudUser){connectorChecks.set(provider,{status:'ok',devices:result.connection?.devices||0});connectorProgress(`Acceso verificado · ${result.connection?.devices||0} dispositivos accesibles · credencial cifrada.`,'ok');await refreshUemConnectors();renderConnectorCenter();toast('Conector verificado y guardado');}saved=true;}
     catch(error){const message=error.code==='connector_credentials_rejected'?'El proveedor rechazó la credencial. Revisa el token, la URL y los permisos de solo lectura.':error.status===403?'Solo owner o admin puede gestionar credenciales.':error.code==='connector_verification_failed'?'No pudimos comprobar el proveedor. Revisa la URL y vuelve a intentarlo.':error.message||'No se pudo guardar el conector.';connectorProgress('La credencial no se guardó. Corrige los datos y vuelve a probar.');connectorError(message);}
-    finally{form.querySelectorAll('input[type="password"],input[data-secret="true"]').forEach(input=>{input.value='';input.type='password';});connectorSaving=false;button.disabled=false;deleteButton.disabled=false;closeButton.disabled=false;button.textContent='Probar y guardar';}
-    if(saved)closeConnectorModal();
+    finally{form.querySelectorAll('input[type="password"],input[data-secret="true"]').forEach(input=>{input.value='';input.type='password';});connectorSaving=false;dialog.removeAttribute('aria-busy');button.disabled=false;deleteButton.disabled=false;closeButton.disabled=false;button.textContent='Probar y guardar';}
+    if(saved){closeConnectorModal();const next=connectorQueue[0];if(next){connectorFlowStep+=1;if(openConnectorModal(next,true))connectorQueue.shift();else{resetConnectorFlow();toast('El catálogo cambió; vuelve a elegir los UEM pendientes.');}}else resetConnectorFlow();}
   }
   async function deleteConnector(){
     if(connectorSaving||!activeConnectorId||!confirm('¿Desconectar este proveedor? La credencial cifrada se eliminará del workspace.'))return;if(!activeConnectorWorkspaceId||activeConnectorWorkspaceId!==activeWorkspaceId){closeConnectorModal(true);toast('El workspace cambió; vuelve a abrir el conector');return;}const provider=activeConnectorId,targetWorkspace=activeConnectorWorkspaceId;let deleted=false;connectorSaving=true;$('#connectorDelete').disabled=true;$('#connectorSave').disabled=true;$('#connectorClose').disabled=true;connectorError('');
@@ -132,7 +161,7 @@
     if(deleted)closeConnectorModal();
   }
   async function refreshCloudSession(){
-    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];cloudOAuthProviders=[];uemProviders=[];uemConnectors=[];uemStatusMessage='';renderCloud();return;}
+    if(!cloudAvailable){cloudUser=null;cloudWorkspaces=[];cloudOAuthProviders=[];uemProviders=[];uemConnectors=[];uemCatalogLoaded=false;uemStatusMessage='';renderCloud();return;}
     cloudUser=await cloud.me();
     cloudWorkspaces=cloudUser?await cloud.listWorkspaces():[];
     if(!cloudWorkspaces.some(item=>item.id===activeWorkspaceId))activeWorkspaceId=cloudWorkspaces[0]?.id||'';
@@ -181,8 +210,8 @@
     }catch(error){toast(error.code==='revision_conflict'?'Conflicto cloud: descarga la última revisión':'Subida cloud: '+error.message);}
   }
   async function logoutCloud(){
-    uemRefreshSequence+=1;closeConnectorModal(true);
-    try{await cloud.logout();cloudUser=null;cloudWorkspaces=[];activeWorkspaceId='';uemProviders=[];uemConnectors=[];uemStatusMessage='';connectorChecks.clear();renderCloud();toast('Sesión cloud cerrada; el modo local sigue activo');}
+    uemRefreshSequence+=1;resetConnectorFlow();closeUemWizard(false);closeConnectorModal(true);
+    try{await cloud.logout();cloudUser=null;cloudWorkspaces=[];activeWorkspaceId='';uemProviders=[];uemConnectors=[];uemCatalogLoaded=false;uemStatusMessage='';wizardSeenWorkspaces.clear();connectorChecks.clear();renderCloud();toast('Sesión cloud cerrada; el modo local sigue activo');}
     catch(error){toast('Logout cloud: '+error.message);}
   }
   function render(){
@@ -252,14 +281,19 @@
     $('#cloudPull').addEventListener('click',pullCloud);
     $('#cloudPush').addEventListener('click',pushCloud);
     $('#cloudLogout').addEventListener('click',logoutCloud);
-    $('#cloudWorkspaceSelect').addEventListener('change',async event=>{closeConnectorModal(true);uemRefreshSequence+=1;activeWorkspaceId=event.target.value;uemProviders=[];uemConnectors=[];uemStatusMessage='';connectorChecks.clear();if(activeWorkspaceId){cloud.invalidate(activeWorkspaceId);await refreshUemConnectors();}renderCloud();toast('Workspace cambiado; integraciones actualizadas');});
+    $('#cloudWorkspaceSelect').addEventListener('change',async event=>{closeConnectorModal(true);uemRefreshSequence+=1;resetConnectorFlow();closeUemWizard(false);activeWorkspaceId=event.target.value;uemProviders=[];uemConnectors=[];uemCatalogLoaded=false;uemStatusMessage='';connectorChecks.clear();if(activeWorkspaceId){cloud.invalidate(activeWorkspaceId);await refreshUemConnectors();}renderCloud();toast('Workspace cambiado; integraciones actualizadas');});
+    $('#openUemWizard').addEventListener('click',openUemWizard);
+    $('#uemWizardForm').addEventListener('submit',startUemWizard);
+    $('#uemWizardCancel').addEventListener('click',()=>closeUemWizard());
+    $('#uemWizardOptions').addEventListener('change',event=>{if(event.target.matches('input[name="provider"]'))syncUemWizardAll();});
+    $('#uemWizardAll').addEventListener('change',event=>{event.target.indeterminate=false;$$('#uemWizardOptions input[name="provider"]').forEach(input=>{input.checked=event.target.checked;});syncUemWizardAll();});
     $('#connectorGrid').addEventListener('click',event=>{const testButton=event.target.closest('[data-test-connector]');if(testButton&&!testButton.disabled){testConnector(testButton.dataset.testConnector);return;}const button=event.target.closest('[data-connector]');if(button&&!button.disabled)openConnectorModal(button.dataset.connector);});
     $('#connectorForm').addEventListener('submit',saveConnector);
     $('#connectorFields').addEventListener('click',event=>{const button=event.target.closest('[data-reveal]');if(!button)return;const input=document.getElementById(button.dataset.reveal);if(!input)return;const reveal=input.type==='password';input.type=reveal?'text':'password';button.textContent=reveal?'Ocultar':'Mostrar';button.setAttribute('aria-label',`${reveal?'Ocultar':'Mostrar'} ${input.name}`);});
-    $('#connectorClose').addEventListener('click',()=>closeConnectorModal());
+    $('#connectorClose').addEventListener('click',cancelConnectorFlow);
     $('#connectorDelete').addEventListener('click',deleteConnector);
-    $('#connectorModal').addEventListener('click',event=>{if(event.target.id==='connectorModal')closeConnectorModal();});
-    addEventListener('keydown',event=>{const modal=$('#connectorModal');if(modal.classList.contains('cloud-hidden'))return;if(event.key==='Escape'){closeConnectorModal();return;}if(event.key==='Tab'){const focusable=$$('.connector-dialog button:not([disabled]),.connector-dialog input:not([disabled])').filter(node=>node.offsetParent!==null);if(!focusable.length)return;const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
+    $('#connectorModal').addEventListener('click',event=>{if(event.target.id==='connectorModal')cancelConnectorFlow();});
+    addEventListener('keydown',event=>{const modal=$('#connectorModal');if(modal.classList.contains('cloud-hidden'))return;if(event.key==='Escape'){cancelConnectorFlow();return;}if(event.key==='Tab'){const focusable=$$('.connector-dialog button:not([disabled]),.connector-dialog input:not([disabled])').filter(node=>node.offsetParent!==null);if(!focusable.length)return;const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
     $('#syncAllUem').addEventListener('click',async()=>{
       const targetWorkspace=activeWorkspaceId,syncSequence=++uemRefreshSequence;
       try{
