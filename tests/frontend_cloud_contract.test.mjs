@@ -80,7 +80,7 @@ test('dashboard exposes a guided connector vault without legacy browser token st
   assert.match(source,/if\(connectorResult\.status==='fulfilled'\)\{uemConnectors=connectorResult\.value;uemCatalogLoaded=true;\}else uemCatalogLoaded=false/);
   assert.doesNotMatch(source,/connectorResult\.status==='fulfilled'\?connectorResult\.value:\[\]/);
   assert.match(source,/openingWorkspaceId=activeWorkspaceId[\s\S]*await refreshUemConnectors\(\)[\s\S]*activeWorkspaceId!==openingWorkspaceId[\s\S]*owner','admin/);
-  assert.match(source,/if\(canManage&&uemCatalogLoaded&&!uemConnectors\.some/);
+  assert.match(source,/if\(canManage&&uemCatalogLoaded&&!uemConnectors\.some[\s\S]*uemWizardOpen=true;showView\('connect'\)/);
   assert.match(source,/availableAccess=canManage&&uemCatalogLoaded/);
   assert.match(source,/async function openUemWizard\(\)[\s\S]*if\(!uemCatalogLoaded\)[\s\S]*await refreshUemConnectors\(\)[\s\S]*No se pudo cargar el catálogo UEM/);
   assert.match(source,/function closeUemWizard\(returnFocus=true\)[\s\S]*aria-expanded'[\s\S]*trigger\.focus\(\)/);
